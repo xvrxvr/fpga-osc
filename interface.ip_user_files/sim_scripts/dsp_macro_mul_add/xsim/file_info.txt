@@ -1,0 +1,2 @@
+dsp_macro_mul_add.vhd,vhdl,xil_defaultlib,../../../../interface.gen/sources_1/ip/dsp_macro_mul_add/sim/dsp_macro_mul_add.vhd,
+glbl.v,Verilog,xil_defaultlib,glbl.v

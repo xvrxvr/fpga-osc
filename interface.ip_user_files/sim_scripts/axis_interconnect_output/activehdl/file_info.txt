@@ -1,0 +1,9 @@
+xpm_cdc.sv,systemverilog,xpm,Z:/Xilinx/Vivado/2023.2/data/ip/xpm/xpm_cdc/hdl/xpm_cdc.sv,incdir="../../../ipstatic/hdl"incdir="../../../ipstatic/hdl"
+xpm_memory.sv,systemverilog,xpm,Z:/Xilinx/Vivado/2023.2/data/ip/xpm/xpm_memory/hdl/xpm_memory.sv,incdir="../../../ipstatic/hdl"incdir="../../../ipstatic/hdl"
+xpm_VCOMP.vhd,vhdl,xpm,Z:/Xilinx/Vivado/2023.2/data/ip/xpm/xpm_VCOMP.vhd,incdir="../../../ipstatic/hdl"incdir="../../../ipstatic/hdl"
+fifo_generator_vlog_beh.v,verilog,fifo_generator_v13_2_9,../../../ipstatic/simulation/fifo_generator_vlog_beh.v,incdir="../../../ipstatic/hdl"incdir="../../../ipstatic/hdl"
+fifo_generator_v13_2_rfs.vhd,vhdl,fifo_generator_v13_2_9,../../../ipstatic/hdl/fifo_generator_v13_2_rfs.vhd,incdir="../../../ipstatic/hdl"incdir="../../../ipstatic/hdl"
+fifo_generator_v13_2_rfs.v,verilog,fifo_generator_v13_2_9,../../../ipstatic/hdl/fifo_generator_v13_2_rfs.v,incdir="../../../ipstatic/hdl"incdir="../../../ipstatic/hdl"
+axis_interconnect_v1_1_vl_rfs.v,verilog,axis_interconnect_v1_1_22,../../../ipstatic/hdl/axis_interconnect_v1_1_vl_rfs.v,incdir="../../../ipstatic/hdl"incdir="../../../ipstatic/hdl"
+axis_interconnect_output.v,verilog,xil_defaultlib,../../../../interface.gen/sources_1/ip/axis_interconnect_output/sim/axis_interconnect_output.v,incdir="../../../ipstatic/hdl"incdir="../../../ipstatic/hdl"
+glbl.v,Verilog,xil_defaultlib,glbl.v

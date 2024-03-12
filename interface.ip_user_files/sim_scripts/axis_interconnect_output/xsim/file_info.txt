@@ -1,0 +1,2 @@
+axis_interconnect_output.v,verilog,xil_defaultlib,../../../../interface.gen/sources_1/ip/axis_interconnect_output/sim/axis_interconnect_output.v,incdir="../../../ipstatic/hdl"incdir="../../../ipstatic/hdl"
+glbl.v,Verilog,xil_defaultlib,glbl.v
