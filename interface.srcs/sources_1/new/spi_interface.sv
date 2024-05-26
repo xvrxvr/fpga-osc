@@ -110,16 +110,23 @@ body_out body_out_imp(.clk, .fpga2host_fifo_filled, .host2fpga_fifo_empty, .spi_
 //////////////////////////////////////////////////////////////////////////////////////////
 // Input path - Host -> FPGA
 logic [31:0] input_data;
-logic input_data_stb;
+logic data_frame;
+logic data_cs;
+logic data_stb;
+logic data_stb_resync;
 logic input_overflow_stb;
 
-cdc_sync #("PULSE") input_data_stb_cdc(.clk, .in(~spi_cs), .out(input_data_stb));
+cdc_sync input_resync_frame_cdc(.clk, .in(spi_frame), .out(data_frame));
+cdc_sync input_resync_cs_cdc(.clk, .in(spi_cs), .out(data_cs));
+cdc_sync #("TOGGLE") data_stb_resync_cdc(.clk, .in(data_stb), .out(data_stb_resync));
 
-spi_input spi_input_imp(.spi_clk, .spi_mosi, .spi_cs, .data(input_data));
+spi_input spi_input_imp(.spi_clk, .spi_mosi, .spi_cs, .spi_frame, .data(input_data), .data_stb);
 
 body_input body_input_imp(.clk, .clr_errors, 
     .data(input_data), 
-    .data_stb(input_data_stb), 
+    .data_cs,
+    .data_frame,
+    .data_stb(data_stb_resync),
     .interf(interf_host2fpga), 
     .overflow_error(input_overflow_stb)     
 );
@@ -295,19 +302,23 @@ module spi_input(
     input wire spi_clk,
     input wire spi_mosi,
     input wire spi_cs,
+    input wire spi_frame,
     
-    output wire [31:0] data
+    output wire [31:0] data,
+    output wire data_stb
 );
 
 logic [30:0] in_register = '0;
 logic [31:0] hold_register = '0;
 logic [4:0] counter = '0;
+logic data_stb_ff = '0;
 
 assign data = hold_register;
+assign data_stb = data_stb_ff;
 
-always_ff @(posedge spi_clk) in_register <= (in_register << 1) | spi_mosi;
-always_ff @(posedge spi_clk) if (counter == 31) hold_register <= {in_register, spi_mosi};
-always @(posedge spi_clk or negedge spi_cs) if (!spi_cs) counter <= '0; else counter <= counter + 1; 
+always_ff @(posedge spi_clk) if (!spi_cs) in_register <= (in_register << 1) | spi_mosi;
+always_ff @(posedge spi_clk) if (counter == 31 && !spi_cs) begin hold_register <= {in_register, spi_mosi}; data_stb_ff <= ~data_stb_ff; end
+always @(posedge spi_clk or negedge spi_frame) if (!spi_frame) counter <= '0; else counter <= counter + 1; 
 
 endmodule
 
@@ -315,115 +326,66 @@ module body_input(
     input wire clk,
     
     input wire [31:0] data,
-    input wire data_stb,
+    input wire data_stb, // Strobe for input data ready
+    input wire data_cs,  // CS from SPI
+    input wire data_frame, // FRAME from SPI
+
     AXIStream.master interf,
     
     output wire overflow_error,
     output wire clr_errors    
 );
 
-logic [31:0] high_bits = '0;
+logic is_cmd = '0; // Set to 1 if currently active command streamed from SPI to FIFO. Set to 0 if first word was 0 (bits 30..0)
+logic is_header = '0; // Current word is a Header (put 1 to TUSER)
+logic [31:0] data_to_send = '0; // Data from SPI frontend to send to FIFO
+logic [5:0] tdest = '0; // TDEST part of header
+logic data_rdy_to_send = '0; // data_to_send is holding vaild data (but TLAST cound be not known yet)
+wire data_rdy_to_send_eff = data_rdy_to_send && is_cmd; // Do we really want to send this data?
+logic tlast_to_send = '0; // TLAST value to send
+logic tlast_ready = '0; // data_to_send and tlast_to_send was set up - data can be pushed to FIFO
 
-wire [31:0] effective_data = {high_bits[0] & data[31], data[30:0]};
-wire bit_stuff_in = get_tag(data) == PT_BitStuff; 
+`NEDGE(frame_start, data_frame);
+`PEDGE(frame_end, data_frame);
+`NEDGE(cs_start, data_cs);
+
+wire data_pushed_to_fifo = tlast_ready && interf.TREADY; // Data was push to FIFO this cycle
+
 logic clr_errors_ff = '0;
 
-ff2 ff2_inst(.clk, .interf, .overflow_error, .data(effective_data), .cmd(get_tag(data) == PT_Cmd), .stb(data_stb && !bit_stuff_in));   
-
-always_ff @(posedge clk)
-    if (data_stb) begin 
-        if (bit_stuff_in) high_bits <= {data[29:0], 1'b1}; else
-        if (data[31]) high_bits <= high_bits >> 1;
-    end
-
-always_ff @(posedge clk) clr_errors_ff <= data_stb && data == 1;
-
 assign clr_errors =  clr_errors_ff;
+assign overflow_error = data_stb && data_rdy_to_send_eff;
 
-endmodule
-
-// ff2 module bufferise 'data' for word and add TLAST flag to buffered word if next word has flag 'cmd'
-// Word with active 'cmd' used as TDEST source
-// 'cmd' with zero 'data' not pushed to FIFO
-
-// Module can holds up to 2 word of data (last word from previous packet + 'cmd' part of next)
-// Module will not implement buffering for 'data' - when 'cmd' word arrived all contents will be flushed to 'interf' before next word arrived 
-//             Empty        Word
-//   !cmd       hold        send current, hold new
-//    cmd       send cmd    send current with TLAST, hold new
-//    zero cmd   --         send current with TLAST
-
-// 2 buffers with flags:
-//  C - Contents (2 bit enum): E - Empty, W - Word, C - Command
-//  T - TLAST
-// Buffers forms shift register, on new data contents is shifted
-// Flags copied as-is, except TLAST - it asserted on copy from 0 to 1 stage if data pushed is 'cmd'
-// Zero command writes 'E' as data to stage 0
-
-// Send process scans shift register stage 1 and send data, if not [E]. Shift register advanced after send
-
-// Pushing anything out of stage 1 if it not empty is an overflow
-
-module ff2(
-    input wire clk,
-    
-    input wire [31:0] data,
-    input wire cmd,
-    input wire stb,
-
-    AXIStream.master interf,    // Destination to push data to
-    
-    output wire overflow_error // 'interf' not ready to accept word from 'data' bus
-);
-
-typedef enum logic [1:0] {
-    Empty = 2'b00,
-    Word = 2'b01,
-    Command = 2'b10
-} Contents ;
-
-typedef struct packed {
-    logic [31:0] data;
-    logic [5:0] tdest;
-    Contents ctx;
-} Stage;
-
-Stage st0 = '0;
-Stage st1 = '0;
-
-logic clr_st1;  // Flag 'clear st1.ctx' (data was send to 'interf')
-logic tlast = '0; // tlast flag for st1
-
-logic overflow_error_ff = '0;
-always_ff @(posedge clk) overflow_error_ff = st1.ctx != Empty && stb;
-assign overflow_error = overflow_error_ff;
-
-// Shift register (ctx field hanled separately)
-always_ff @(posedge clk)
-    if (stb) begin
-        st1.data <= st0.data;
-        st1.tdest <= st0.tdest;
-        tlast <= st0.ctx == Word && cmd && stb;
-        st0.data <= data;
-        st0.ctx <= !stb ? Empty : !cmd ? Word : data == '0 ? Empty : Command;
-        if (stb && cmd) st0.tdest <= data[29:24]; 
-    end
-
-// Shift register for 'ctx' field
 always_ff @(posedge clk) begin
-    if (clr_st1) st1.ctx <= Empty;
-    if (stb) st1.ctx <= st0.ctx;
-end    
+    if (frame_start) is_header <= 1'b1; else
+    if (data_pushed_to_fifo) is_header <= 1'b0;
+end
 
-// 'interf' sender
-wire tvalid = st1.ctx != Empty;
+always_ff @(posedge clk) begin
+    if (data_stb) begin 
+        data_to_send <= data; 
+        if (is_header) begin is_cmd <= data != 0; tdest <= get_dest(data); end
+        data_rdy_to_send <= 1'b1; 
+    end
+    else if (data_pushed_to_fifo) begin
+        data_rdy_to_send <= 1'b0;
+    end
+end
 
-assign interf.TVALID = tvalid;
-assign interf.TDATA = st1.data;
-assign interf.TLAST = tlast;
-assign interf.TDEST = st1.tdest;
-assign interf.TUSER = st1.ctx == Command ? '1 : '0;
+always_ff @(posedge clk) begin
+    if (data_rdy_to_send_eff && !tlast_ready) begin
+        if (frame_end) begin tlast_to_send <= 1'b1; tlast_ready <= 1'b1; end else // Frame is done - send accumulated word as LAST
+        if (cs_start)  begin tlast_to_send <= 1'b0; tlast_ready <= 1'b1; end      // Next word seen (recieve started). This word not last, and can be send to FIFO
+    end
+    if (data_pushed_to_fifo) tlast_ready <= 1'b0;
+end
 
-assign clr_st1 = tvalid && interf.TREADY;
-  
+assign interf.TVALID = tlast_ready;
+assign interf.TDATA = data_to_send;
+assign interf.TLAST = tlast_to_send;
+assign interf.TDEST = tdest;
+assign interf.TUSER = is_header ? '1 : '0;
+
+always_ff @(posedge clk) clr_errors_ff <= data_stb && is_header && data == 1;
+
 endmodule

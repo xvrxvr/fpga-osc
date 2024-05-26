@@ -64,4 +64,8 @@ function automatic [1:0] get_tag(CmdPkt cmd);
     return cmd.cmd_tag;
 endfunction 
 
+function automatic [1:0] get_dest(CmdPkt cmd);
+    return cmd.dest;
+endfunction 
+
 endpackage
