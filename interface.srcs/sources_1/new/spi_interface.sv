@@ -97,10 +97,12 @@ spi_out spi_out_inst(.spi_clk, .spi_miso, .spi_cs,
 
 // Resync spi_out_data_req and spi_frame to 'clk' domain
 logic spi_out_data_req_clk;
-logic spi_frame_clk;
+logic data_frame;
+
+cdc_sync input_resync_frame_cdc(.clk, .in(spi_frame), .out(data_frame));
 
 cdc_sync #("PULSE") cdc_out_data_reg(.clk, .in(spi_out_data_req), .out(spi_out_data_req_clk));
-cdc_sync #("TOGGLE") cdc_frame(.clk, .in(spi_frame), .out(spi_frame_clk));
+`NEDGE(spi_frame_clk, spi_frame);
 
 body_out body_out_imp(.clk, .fpga2host_fifo_filled, .host2fpga_fifo_empty, .spi_out_data_word, .spi_out_data_req_clk, .spi_frame_clk, .spi_int,
     .interf_out(interf_fpga2host),
@@ -110,13 +112,11 @@ body_out body_out_imp(.clk, .fpga2host_fifo_filled, .host2fpga_fifo_empty, .spi_
 //////////////////////////////////////////////////////////////////////////////////////////
 // Input path - Host -> FPGA
 logic [31:0] input_data;
-logic data_frame;
 logic data_cs;
 logic data_stb;
 logic data_stb_resync;
 logic input_overflow_stb;
 
-cdc_sync input_resync_frame_cdc(.clk, .in(spi_frame), .out(data_frame));
 cdc_sync input_resync_cs_cdc(.clk, .in(spi_cs), .out(data_cs));
 cdc_sync #("TOGGLE") data_stb_resync_cdc(.clk, .in(data_stb), .out(data_stb_resync));
 
@@ -168,20 +168,20 @@ always @(posedge spi_cs) spi_out_hold_reg <= data_to_send;
 
 always @(negedge spi_clk or negedge spi_cs)
     if (!spi_cs) bit0 <= '1;
-    else bit0 <= '1;
+    else bit0 <= '0;
 
-assign spi_miso = bit0 ? spi_out_hold_reg[31] : spi_out_shift_reg[30];
+assign spi_miso = bit0 ? spi_out_hold_reg[0] : spi_out_shift_reg[0];
 
 always @(negedge spi_clk or negedge spi_cs) begin
     if (!spi_cs) begin // We in reset
         spi_out_bit_counter <= '0;
     end else begin
-        spi_out_bit_counter <= spi_out_bit_counter + 1;
+        spi_out_bit_counter <= spi_out_bit_counter + 1'b1;
     end
 end
  
 always @(negedge spi_clk) begin
-    spi_out_shift_reg <= bit0 ? spi_out_hold_reg[30:0] : spi_out_shift_reg << 1;
+    spi_out_shift_reg <= bit0 ? spi_out_hold_reg[31:1] : spi_out_shift_reg >> 1;
 end
 
 always @(negedge spi_clk or negedge spi_cs) begin
@@ -316,9 +316,9 @@ logic data_stb_ff = '0;
 assign data = hold_register;
 assign data_stb = data_stb_ff;
 
-always_ff @(posedge spi_clk) if (!spi_cs) in_register <= (in_register << 1) | spi_mosi;
-always_ff @(posedge spi_clk) if (counter == 31 && !spi_cs) begin hold_register <= {in_register, spi_mosi}; data_stb_ff <= ~data_stb_ff; end
-always @(posedge spi_clk or negedge spi_frame) if (!spi_frame) counter <= '0; else counter <= counter + 1; 
+always_ff @(posedge spi_clk) if (!spi_cs) in_register <= {spi_mosi, in_register[30:1]};
+always_ff @(posedge spi_clk) if (counter == 31 && !spi_cs) begin hold_register <= {spi_mosi, in_register}; data_stb_ff <= ~data_stb_ff; end
+always @(posedge spi_clk or negedge spi_frame) if (!spi_frame) counter <= '0; else counter <= counter + 1'b1; 
 
 endmodule
 
