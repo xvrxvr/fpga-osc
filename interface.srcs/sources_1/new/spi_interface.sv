@@ -90,7 +90,7 @@ logic [31:0] spi_out_data_word;// Word preloaded from input FIFO
 logic spi_out_data_req;                 // Pulse to 1 if new data can be supplied (CDC and rasing edge logic required)
 //////////////
 
-spi_out spi_out_inst(.spi_clk, .spi_miso, .spi_cs,
+spi_out spi_out_inst(.spi_clk, .spi_miso, .spi_cs(spi_cs | spi_frame),
     .data_to_send(spi_out_data_word),
     .next_data_request(spi_out_data_req)    
 );
@@ -98,31 +98,38 @@ spi_out spi_out_inst(.spi_clk, .spi_miso, .spi_cs,
 // Resync spi_out_data_req and spi_frame to 'clk' domain
 logic spi_out_data_req_clk;
 logic data_frame;
+logic out_reg_filled;
 
 cdc_sync input_resync_frame_cdc(.clk, .in(spi_frame), .out(data_frame));
 
-cdc_sync #("PULSE") cdc_out_data_reg(.clk, .in(spi_out_data_req), .out(spi_out_data_req_clk));
+cdc_sync #("TOGGLE") cdc_out_data_reg(.clk, .in(spi_out_data_req), .out(spi_out_data_req_clk));
 `NEDGE(spi_frame_clk, spi_frame);
 
-body_out body_out_imp(.clk, .fpga2host_fifo_filled, .host2fpga_fifo_empty, .spi_out_data_word, .spi_out_data_req_clk, .spi_frame_clk, .spi_int,
+body_out body_out_imp(
+    .clk, .fpga2host_fifo_filled, .host2fpga_fifo_empty, 
+    .spi_out_data_word, .out_reg_filled,
+    .req_data(spi_out_data_req_clk | spi_frame_clk), 
+    .req_counters(),
+    .grant_counters(),
     .interf_out(interf_fpga2host),
     .errors(err_scale)
 );
 
+assign spi_int = out_reg_filled | (fpga2host_fifo_filled != 0);
 //////////////////////////////////////////////////////////////////////////////////////////
 // Input path - Host -> FPGA
 logic [31:0] input_data;
 logic data_cs;
-logic data_stb;
+logic data_stb_toggle;
 logic data_stb_resync;
 logic input_overflow_stb;
 
 cdc_sync input_resync_cs_cdc(.clk, .in(spi_cs), .out(data_cs));
-cdc_sync #("TOGGLE") data_stb_resync_cdc(.clk, .in(data_stb), .out(data_stb_resync));
+cdc_sync #("TOGGLE") data_stb_resync_cdc(.clk, .in(data_stb_toggle), .out(data_stb_resync));
 
-spi_input spi_input_imp(.spi_clk, .spi_mosi, .spi_cs, .spi_frame, .data(input_data), .data_stb);
+spi_input spi_input_imp(.spi_clk, .spi_mosi, .spi_cs, .spi_frame, .data(input_data), .data_stb_toggle);
 
-body_input body_input_imp(.clk, .clr_errors, 
+body_input body_input_imp(.clk,
     .data(input_data), 
     .data_cs,
     .data_frame,
@@ -184,9 +191,8 @@ always @(negedge spi_clk) begin
     spi_out_shift_reg <= bit0 ? spi_out_hold_reg[31:1] : spi_out_shift_reg >> 1;
 end
 
-always @(negedge spi_clk or negedge spi_cs) begin
-    if (!spi_cs) next_data_request_ff <= '0; else
-    if (spi_out_bit_counter == NewDataBit) next_data_request_ff <= '1; 
+always @(negedge spi_clk) begin
+    if (spi_out_bit_counter == NewDataBit) next_data_request_ff <= ~next_data_request_ff; 
 end
 
 endmodule
@@ -201,96 +207,75 @@ module body_out(
     input wire [9:0] host2fpga_fifo_empty, // 0-512
 
     output wire [31:0] spi_out_data_word,
-    input wire spi_out_data_req_clk,
-    input wire spi_frame_clk,
+    input wire req_data,
+    input wire req_counters,
+    output wire grant_counters,
     
     input ErrorScale errors,
     
-    output wire spi_int
+    output wire out_reg_filled
 );
 `UNUSED({interf_out.TUSER, interf_out.TDEST});
 
-logic [31:0] out_data_word = '0; // Data preloaded from FIFO
-logic [29:0] bit_stuff_acc = '0; // High bits from Data
-logic [4:0] bit_stuff_count = '0; // How many bits collected in 'bit_stuff_acc'  
-logic [31:0] out_status_word = '0; // Status word (from Frame strobe or from empty FIFO)
-logic data_fetch_slot = '0; // Set to 1 if Data can be read from FIFO
-logic out_status_word_override = '0; // select 'out_status_word' event Data is available 
-logic out_data_filled = '0; // 'out_data_word' is filled
-logic send_stuff_bits = '0; // Set to 1 to override Data and send BitStuff instead 
+typedef struct packed {
+    logic [31:0] data;
+    logic data_active;
+} SPIData;
 
-logic spi_int_ff = '0;
+logic [31:0] st1_data = '0; // Data to send to SPI
+SPIData st2 = '0; // 2nd word os ESC of Data to send to SPI
+SPIData out_data_word = '0; // Data preloaded from FIFO
+logic out_data_word_first_word = '0; // Header word placed in 'out_data_word'
+logic out_data_word_last_word = '0; // Last word of packet placed in 'out_data_word' 
+logic last_word_is_last = '0; // Set to 1 if last word sent to SPI was last word in packet
 
-always @(posedge clk) spi_int_ff <= out_status_word_override || out_data_filled || send_stuff_bits || fpga2host_fifo_filled != '0;  
-assign spi_int = spi_int_ff;   
+assign spi_out_data_word = st1_data;
+assign out_reg_filled = st2.data_active | out_data_word.data_active | req_counters;
 
-assign spi_out_data_word = out_status_word_override ?  out_status_word :
-                           out_data_filled ? out_data_word :
-                           send_stuff_bits ? {PT_BitStuff, bit_stuff_acc} : out_status_word;                     
+assign interf_out.TREADY = !out_data_word.data_active;
 
-wire tready = !out_data_filled && !send_stuff_bits && data_fetch_slot;
-assign interf_out.TREADY = tready;
-wire data_available = tready && interf_out.TVALID;
-
-// Handle data_fetch_slot
-always_ff @(posedge clk)
-    if (spi_out_data_req_clk || spi_frame_clk) data_fetch_slot <= '1; else
-    if (data_available) data_fetch_slot <= '0;
-
-// Peek data from FIFO and place it to out_data_word  
-always_ff @(posedge clk) 
-    if (data_available) begin
-        out_data_word <= {1'b1, interf_out.TDATA[30:0]};
-        out_data_filled <= '1;
-    end else if (!out_status_word_override && spi_out_data_req_clk) begin
-        out_data_filled <= '0;
-    end
-
-// Would we really send stuff bits in this time?
-wire effective_send_stuff_bits = !out_status_word_override && !out_data_filled && send_stuff_bits && spi_out_data_req_clk;
-
-// Fill bitstuff register & update counter
-always_ff @(posedge clk) begin 
-    if (effective_send_stuff_bits) begin
-         bit_stuff_acc <= '0;
-         bit_stuff_count <= '0;        
-    end 
-    if (data_available && !interf_out.TUSER[0] && (interf_out.TDATA[31] || bit_stuff_count != '0)) begin
-         bit_stuff_acc <= (bit_stuff_acc << 1) | interf_out.TDATA[31];
-         bit_stuff_count <= bit_stuff_count + 1;
-    end
-end
-
-// Form send_stuff_bits flag
-always_ff @(posedge clk)
-    if (data_available && interf_out.TLAST && bit_stuff_count != 0) send_stuff_bits <= '1; else // Flush of TLAST (if any)
-    if (data_available && bit_stuff_count == 28) send_stuff_bits <= '1; else // Flush of full BitStuff register
-    if (effective_send_stuff_bits) send_stuff_bits <= '0; // Clear when sent
-
-// Status (by OOB and Empty FIFO)
 always_ff @(posedge clk) begin
-    if (out_status_word_override && spi_out_data_req_clk) out_status_word_override <= '0;
-    if (spi_frame_clk || !out_status_word_override && spi_out_data_req_clk)
-        out_status_word <= CmdPkt'{
-            cmd_tag: PT_Cmd, dest: 6'b0, 
-            payload: StatusPayload'{
-                padding: 5'b0,
-                buf_reg_filled: out_data_filled || send_stuff_bits, 
-                errors: errors, 
-                oob_answer: spi_frame_clk, 
-                delimiter: fpga2host_fifo_filled == 0 && !(out_data_filled || send_stuff_bits), 
-                fpga2host_fifo_filled: cnt_scale(fpga2host_fifo_filled), 
-                hos3fpgat_fifo_empty: cnt_scale(host2fpga_fifo_empty)
-            }
-        };
-    if (spi_frame_clk) out_status_word_override <= '1;
+    if (!out_data_word.data_active & interf_out.TVALID) begin 
+        out_data_word.data <= interf_out.TDATA; 
+        out_data_word_first_word <= interf_out.TUSER[0];
+        out_data_word_last_word <= interf_out.TLAST;
+        out_data_word.data_active <= 1'b1; 
+    end else if (req_data && !st2.data_active && !req_counters) out_data_word.data_active <= 1'b0;
 end
 
-function automatic [7:0] cnt_scale(logic [9:0] value);
-    if (value >= 512) return 8'h80;
-    if (value < 128) return value;
-    return 8'h80 | (value >> 2);
-endfunction 
+assign grant_counters = req_counters & !st2.data_active & req_data;
+
+// Data request - fill st1
+always_ff @(posedge clk) begin
+    if (req_data) begin
+        if (st2.data_active) begin // 2nd word os ESC sequence always has a precidence
+            st1_data <= st2.data;
+            st2.data_active <= 1'b0;
+        end else if (req_counters) begin // Emit Stat ESC
+            st1_data <= {OutESC, ET_Stat};
+            st2.data <= StatusPayload'{
+                padding: '0,
+                errors: errors,
+                buf_reg_filled: out_data_word.data_active,
+                fpga2host_fifo_filled: fpga2host_fifo_filled,
+                host2fpga_fifo_empty: host2fpga_fifo_empty            
+            }; st2.data_active <= 1'b1;
+        end else if (out_data_word.data_active) begin // Send Data
+            if (out_data_word_first_word) begin // Send as Esc Header
+                st1_data <= {OutESC, ET_Data};
+                st2.data <= out_data_word.data; st2.data_active <= 1'b1;
+            end else if (out_data_word.data[31:2] == OutESC) begin // Send as ESC Data sequence
+                st1_data <= {OutESC, ET_Data};
+                st2.data <= {30'h0, out_data_word.data[1:0]}; st2.data_active <= 1'b1;                
+            end else begin // Send as is
+                st1_data <= out_data_word.data;
+            end
+            last_word_is_last <= out_data_word_last_word;
+        end else begin // Send 'empty' ESC
+            st1_data <= {OutESC, last_word_is_last ? ET_Pkt : ET_Wait};
+        end
+    end
+end
 
 endmodule
 
@@ -305,7 +290,7 @@ module spi_input(
     input wire spi_frame,
     
     output wire [31:0] data,
-    output wire data_stb
+    output wire data_stb_toggle
 );
 
 logic [30:0] in_register = '0;
@@ -314,7 +299,7 @@ logic [4:0] counter = '0;
 logic data_stb_ff = '0;
 
 assign data = hold_register;
-assign data_stb = data_stb_ff;
+assign data_stb_toggle = data_stb_ff;
 
 always_ff @(posedge spi_clk) if (!spi_cs) in_register <= {spi_mosi, in_register[30:1]};
 always_ff @(posedge spi_clk) if (counter == 31 && !spi_cs) begin hold_register <= {spi_mosi, in_register}; data_stb_ff <= ~data_stb_ff; end
@@ -332,8 +317,7 @@ module body_input(
 
     AXIStream.master interf,
     
-    output wire overflow_error,
-    output wire clr_errors    
+    output wire overflow_error
 );
 
 logic is_cmd = '0; // Set to 1 if currently active command streamed from SPI to FIFO. Set to 0 if first word was 0 (bits 30..0)
@@ -351,9 +335,6 @@ logic tlast_ready = '0; // data_to_send and tlast_to_send was set up - data can 
 
 wire data_pushed_to_fifo = tlast_ready && interf.TREADY; // Data was push to FIFO this cycle
 
-logic clr_errors_ff = '0;
-
-assign clr_errors =  clr_errors_ff;
 assign overflow_error = data_stb && data_rdy_to_send_eff;
 
 always_ff @(posedge clk) begin
@@ -385,7 +366,5 @@ assign interf.TDATA = data_to_send;
 assign interf.TLAST = tlast_to_send;
 assign interf.TDEST = tdest;
 assign interf.TUSER = is_header ? '1 : '0;
-
-always_ff @(posedge clk) clr_errors_ff <= data_stb && is_header && data == 1;
 
 endmodule

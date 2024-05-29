@@ -198,7 +198,7 @@ bram_sender #(.TDEST(DST_OSC), .RAM_ADDR_SIZE(RAM_ADDR_SIZE)) bram_sender_imp (
     .ctrl_start_address(cfg_data), // BRAM start address to send contents
     .ctr_size(ram_send_size), // Size of BRAM data chunk to send
     .ctrl_start(cfg_stb && cfg_register == HSOWR_RAM_Read),  // Pulse to 1 to start BRAM data sending process.  Ignored if module currently busy
-    .header(CmdPkt'{cmd_tag: PT_Cmd, dest: DST_OSC, payload: cfg_address}),
+    .header(CmdPkt'{dest: DST_OSC, payload: cfg_address}),
     .busy(ram_sender_busy),   // Set to 1 while module busy sending BRAM contents.
 
     // OOB data send. - not used

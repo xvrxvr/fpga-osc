@@ -1,21 +1,9 @@
 package SPIInterf;
 
 // Data word
-typedef struct packed {
-    logic data_tag; // Must be 1
-    logic [30:0] data;
-} DataPkt;
-
-// High bits packet
-typedef struct packed {
-    logic [1:0] bs_tag; // Must be 01
-    logic [29:0] high_bits; 
-} BitStuffPkt;
-
 // Command
 typedef struct packed {
-    logic [1:0] cmd_tag; // Must be 00
-    logic [5:0] dest;   // Destination
+    logic [7:0] dest;   // Destination
     logic [23:0] payload;
 } CmdPkt;
 
@@ -32,25 +20,20 @@ typedef struct packed {
 } ErrorScale;
 
 typedef struct packed {
-    logic [4:0] padding;
-    logic buf_reg_filled; // Intermidiate buffer register filled
+    logic [8:0] padding;
     ErrorScale errors;
-    logic oob_answer; // This is answer to OOB request
-    logic delimiter; // This is Packet Delimiter (previous Packet done)
-    logic [7:0] fpga2host_fifo_filled;
-    logic [7:0] hos3fpgat_fifo_empty;
+    logic buf_reg_filled; // Intermidiate buffer register filled
+    logic [9:0] fpga2host_fifo_filled;
+    logic [9:0] host2fpga_fifo_empty;
 } StatusPayload;
 
-typedef union packed {
-    DataPkt data;
-    BitStuffPkt bit_stuf;
-    CmdPkt cmd;
-} Pkt;
-
-typedef enum logic [1:0] {
-    PT_BitStuff = 2'b01,
-    PT_Cmd = 2'b00
-} PktType;
+// FIFO ctrl SPI data words
+typedef struct packed {
+    ErrorScale errors;
+    logic buf_reg_filled; // Intermidiate buffer register filled
+    logic [3:0] zero; // Should be 0
+    logic one; // Should be 1
+} FifoCtrlSPIW1;
 
 typedef enum logic [5:0] {
     DST_SYSTEM,
@@ -60,12 +43,17 @@ typedef enum logic [5:0] {
     DST_GEN
 } DestTypes;
 
-function automatic [1:0] get_tag(CmdPkt cmd);
-    return cmd.cmd_tag;
-endfunction 
-
-function automatic [1:0] get_dest(CmdPkt cmd);
+function automatic [7:0] get_dest(CmdPkt cmd);
     return cmd.dest;
 endfunction 
+
+const logic [29:0] OutESC = 30'h28C9484F;
+
+typedef enum logic [1:0] {
+    ET_Data,
+    ET_Stat,
+    ET_Wait,
+    ET_Pkt
+} SECTyope;
 
 endpackage

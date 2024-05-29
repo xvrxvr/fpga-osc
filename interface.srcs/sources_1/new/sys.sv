@@ -45,7 +45,7 @@ wire hb_reg_wr = wr_stb && addr[23 -: 4] == SR_HB;
 
 bram_reciever #(3) inp_cmd (.clk, .interf(input_cmd_interf), .ram_addr(addr), .ram_data(), .ram_wr_en(), .addr_wr_stb(wr_stb), .ctrl_ready_to_process(1'b1));
 
-hdr_sender #(DST_SYSTEM) hb_sender(.clk, .interf(output_data_interf), .header( CmdPkt'{cmd_tag: PT_Cmd, dest: DST_SYSTEM, payload:SR_HB}), .stb(hb_cnt_hit && hb_interval != '0));
+hdr_sender #(DST_SYSTEM) hb_sender(.clk, .interf(output_data_interf), .header( CmdPkt'{dest: DST_SYSTEM, payload:SR_HB}), .stb(hb_cnt_hit && hb_interval != '0));
 
 always_ff @(posedge clk) if (hb_reg_wr) hb_interval <= addr[15:0];
     
