@@ -27,7 +27,7 @@ interface AXIStream;
     wire TREADY;
     wire [31:0] TDATA;
     wire TLAST;
-    wire [5:0] TDEST;
+    wire [7:0] TDEST;
     wire [3:0] TUSER;
     modport master(
         output TVALID,
@@ -82,6 +82,12 @@ ErrorScale err_scale = '0;
 //      1. spi_frane toggle
 //      2. SPI shift register shift out 24 bit (24 is abitrary choosen constant, can be anything in range 16-30) 
 
+logic spi_data_miso, spi_stat_miso;
+logic spi_data_int, spi_stat_int;
+
+assign spi_miso = spi_frame ? spi_stat_miso : spi_data_miso;
+assign spi_int = spi_frame ? spi_stat_frame : spi_data_frame;
+
 /// Cross domain signals ///
 // Sources for hold register
 logic [31:0] spi_out_data_word;// Word preloaded from input FIFO
@@ -91,7 +97,7 @@ logic spi_out_data_req;                 // Pulse to 1 if new data can be supplie
 logic spi_data_sent_toggle;
 //////////////
 
-spi_out spi_out_inst(.spi_clk, .spi_miso, .spi_cs(spi_cs | spi_frame),
+spi_out spi_out_inst(.spi_clk, .spi_miso(spi_data_miso), .spi_cs(spi_cs | spi_frame),
     .data_to_send(spi_out_data_word),
     .next_data_request(spi_out_data_req),
     .data_sent_toggle(spi_data_sent_toggle)    
@@ -99,39 +105,53 @@ spi_out spi_out_inst(.spi_clk, .spi_miso, .spi_cs(spi_cs | spi_frame),
 
 // Resync spi_out_data_req and spi_frame to 'clk' domain
 logic spi_out_data_req_clk;
-logic data_frame;
+logic data_cs;
 logic out_reg_filled;
 logic data_sent;
 
-cdc_sync input_resync_frame_cdc(.clk, .in(spi_frame), .out(data_frame));
+cdc_sync input_resync_cs_cdc(.clk, .in(spi_cs), .out(data_cs));
 
 cdc_sync #("TOGGLE") cdc_out_data_reg(.clk, .in(spi_out_data_req), .out(spi_out_data_req_clk));
 cdc_sync #("TOGGLE") cdc_spi_data_sent_reg(.clk, .in(spi_data_sent_toggle), .out(data_sent));
 
-`NEDGE(spi_frame_start, spi_frame);
-`PEDGE(spi_frame_end, spi_frame);
+logic spi_frame_resync;
+cdc_sync spi_frame_sync(.clk, .in(spi_frame), .out(spi_frame_resync));
+
+`NEDGE(spi_frame_start, spi_frame_resync);
+`PEDGE(spi_frame_end, spi_frame_resync);
+
+logic req_counters, grant_counters,
+
 
 body_out body_out_imp(
     .clk, .fpga2host_fifo_filled, .host2fpga_fifo_empty, 
     .spi_out_data_word, .out_reg_filled, .data_sent,
     .req_data(spi_out_data_req_clk | spi_frame_start), 
     .frame_end(spi_frame_end),
-    .req_counters(),
-    .grant_counters(),
+    .req_counters,
+    .grant_counters,
     .interf_out(interf_fpga2host),
     .errors(err_scale)
 );
 
-assign spi_int = out_reg_filled | (fpga2host_fifo_filled != 0);
+assign spi_data_int = out_reg_filled | (fpga2host_fifo_filled != 0);
+//////////////////////////////////////////////////////////////////////////////////////////
+// 8 bit FIFO control
+
+spi_fifo_ctrl sfc(
+    .clk, .spi_clk, .spi_mosi, .spi_miso(spi_stat_miso), .spi_int(spi_stat_int), .spi_cs, .spi_frame,
+    .spi_cs_resync(data_cs), .spi_frame_resync(spi_frame_resync),
+    .fpga2host_fifo_filled, .host2fpga_fifo_empty,
+    .req_counters, .grant_counters,
+    .clr_errors);
+
 //////////////////////////////////////////////////////////////////////////////////////////
 // Input path - Host -> FPGA
 logic [31:0] input_data;
-logic data_cs;
 logic data_stb_toggle;
 logic data_stb_resync;
 logic input_overflow_stb;
 
-cdc_sync input_resync_cs_cdc(.clk, .in(spi_cs), .out(data_cs));
 cdc_sync #("TOGGLE") data_stb_resync_cdc(.clk, .in(data_stb_toggle), .out(data_stb_resync));
 
 spi_input spi_input_imp(.spi_clk, .spi_mosi, .spi_cs, .spi_frame, .data(input_data), .data_stb_toggle);
@@ -139,7 +159,7 @@ spi_input spi_input_imp(.spi_clk, .spi_mosi, .spi_cs, .spi_frame, .data(input_da
 body_input body_input_imp(.clk,
     .data(input_data), 
     .data_cs,
-    .data_frame,
+    .data_frame(spi_frame_resync),
     .data_stb(data_stb_resync),
     .interf(interf_host2fpga), 
     .overflow_error(input_overflow_stb)     
@@ -386,5 +406,79 @@ assign interf.TDATA = data_to_send;
 assign interf.TLAST = tlast_to_send;
 assign interf.TDEST = tdest;
 assign interf.TUSER = is_header ? '1 : '0;
+
+endmodule
+////////////////////////////////////////////////////
+
+// 8 bit FIFO Status interface
+// Implements:
+//  SPI in/out
+//  FIFO stat request
+//  FIFO words counter (to automatically request FIFO stat update emit)
+//  Treshold Sys register
+//  Error clear Sys register
+module spi_fifo_ctrl(
+    input wire clk,
+
+    // SPI physical interface
+    input wire spi_clk,
+    input wire spi_mosi,
+    output wire spi_miso,
+    input wire spi_cs,    
+    input wire spi_frame, // Frame signal. SPI addressed only when Frame is 1
+    output wire spi_int,  // Emit 'has HOST->FPGA input space' signal (active is 1)
+
+    // Resync version of some SPI control
+    input wire spi_cs_resync,
+    input wire spi_frame_resync,
+
+    // FIFO status feeds
+    input wire [9:0] fpga2host_fifo_filled,
+    input wire [9:0] host2fpga_fifo_empty,
+
+    // Rest of control
+    output wire req_counters, // Set to 1 if output channel should emit FIFO Status ESC record
+    input wire grant_counters, // Answer for 'req_counter'. 'req_counter' should be held in 1 until this signal will be set to 1
+    output wire clr_errors // Clear all error status bits
+);
+
+///// Input SPI part
+logic [7:0] spi_reg_data  = '0; // Accumulator for Data word from SPI
+logic [7:0] spi_in_shift_reg = '0; // Shift register for SPI
+logic [2:0] spi_bit_count = '0; // Bit counter in SPI transaction
+logic       spi_cmd_clear = '0; // Toggle bit for 'clear' system register
+logic [7:0] spi_reg_threshold = '0; // Treshold for 'int' generation
+
+wire spi_cs_eff = ~spi_cs & spi_frame; // Enable SPI
+
+always_ff @(posedge spi_clk or negedge spi_cs_eff) begin
+    if (!spi_cs_eff) spi_bit_count <= '0;
+    else spi_bit_count <= spi_bit_count + 1'b1;
+end
+
+always_ff @(posedge spi_clk) spi_in_shift_reg <= {spi_mosi, spi_in_shift_reg[6:0]};
+
+always_ff @(posedge spi_clk) begin
+    if (spi_bit_count == 3'd7 && spi_mosi == 0) spi_reg_data <= spi_in_shift_reg;
+end
+
+always_ff @(posedge spi_clk) begin
+    if (spi_bit_count == 3'd7 && spi_mosi == 1) begin
+        case(spi_in_shift_reg)
+            6'd0: spi_reg_threshold <= spi_reg_data;
+            6'd1: spi_cmd_clear <= ~spi_cmd_clear;
+        endcase
+    end
+end
+
+cdc_sync #("TOGGLE") sync_clear(.clk, .in(spi_cmd_clear), .out(clr_errors));
+/////
+assign spi_int = host2fpga_fifo_empty >= spi_reg_threshold;
+
+///// Output SPI part
+
+///// Stat auto request handler
+
+
 
 endmodule
