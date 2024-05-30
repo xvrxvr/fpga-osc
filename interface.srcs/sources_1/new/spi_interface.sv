@@ -88,27 +88,34 @@ logic [31:0] spi_out_data_word;// Word preloaded from input FIFO
 
 // Signal to 'clk' domain about new data request
 logic spi_out_data_req;                 // Pulse to 1 if new data can be supplied (CDC and rasing edge logic required)
+logic spi_data_sent_toggle;
 //////////////
 
 spi_out spi_out_inst(.spi_clk, .spi_miso, .spi_cs(spi_cs | spi_frame),
     .data_to_send(spi_out_data_word),
-    .next_data_request(spi_out_data_req)    
+    .next_data_request(spi_out_data_req),
+    .data_sent_toggle(spi_data_sent_toggle)    
 );
 
 // Resync spi_out_data_req and spi_frame to 'clk' domain
 logic spi_out_data_req_clk;
 logic data_frame;
 logic out_reg_filled;
+logic data_sent;
 
 cdc_sync input_resync_frame_cdc(.clk, .in(spi_frame), .out(data_frame));
 
 cdc_sync #("TOGGLE") cdc_out_data_reg(.clk, .in(spi_out_data_req), .out(spi_out_data_req_clk));
-`NEDGE(spi_frame_clk, spi_frame);
+cdc_sync #("TOGGLE") cdc_spi_data_sent_reg(.clk, .in(spi_data_sent_toggle), .out(data_sent));
+
+`NEDGE(spi_frame_start, spi_frame);
+`PEDGE(spi_frame_end, spi_frame);
 
 body_out body_out_imp(
     .clk, .fpga2host_fifo_filled, .host2fpga_fifo_empty, 
-    .spi_out_data_word, .out_reg_filled,
-    .req_data(spi_out_data_req_clk | spi_frame_clk), 
+    .spi_out_data_word, .out_reg_filled, .data_sent,
+    .req_data(spi_out_data_req_clk | spi_frame_start), 
+    .frame_end(spi_frame_end),
     .req_counters(),
     .grant_counters(),
     .interf_out(interf_fpga2host),
@@ -154,10 +161,11 @@ module spi_out(
     input wire spi_cs,
 
     input wire [31:0] data_to_send,
-    output wire next_data_request 
+    output wire next_data_request,
+    output wire data_sent_toggle 
 );
 
-localparam NewDataBit = 24;
+const logic [4:0] NewDataBit = 26;
 
 // Hold/shift SPI register
 logic [30:0] spi_out_shift_reg = '0; // Register used to shift out SPI data. On first SPI clock original data cpoied to it, on follow clock its contents is shifted
@@ -168,8 +176,10 @@ logic bit0 = '1; // Set to 1 during sending first bit of SPI. Used to commutate 
 logic [4:0] spi_out_bit_counter;
 
 logic next_data_request_ff = 0;
+logic data_sent_toggle_ff = 0;
 
 assign next_data_request = next_data_request_ff;
+assign data_sent_toggle = data_sent_toggle_ff;
 
 always @(posedge spi_cs) spi_out_hold_reg <= data_to_send;
 
@@ -192,7 +202,8 @@ always @(negedge spi_clk) begin
 end
 
 always @(negedge spi_clk) begin
-    if (spi_out_bit_counter == NewDataBit) next_data_request_ff <= ~next_data_request_ff; 
+    if (spi_out_bit_counter == NewDataBit) next_data_request_ff <= ~next_data_request_ff;
+    if (bit0) data_sent_toggle_ff <= ~data_sent_toggle_ff; 
 end
 
 endmodule
@@ -208,6 +219,8 @@ module body_out(
 
     output wire [31:0] spi_out_data_word,
     input wire req_data,
+    input wire data_sent,
+    input wire frame_end,
     input wire req_counters,
     output wire grant_counters,
     
@@ -222,14 +235,14 @@ typedef struct packed {
     logic data_active;
 } SPIData;
 
-logic [31:0] st1_data = '0; // Data to send to SPI
-SPIData st2 = '0; // 2nd word os ESC of Data to send to SPI
+SPIData st1 = '0, st2 = '0; // 2nd word os ESC of Data to send to SPI
 SPIData out_data_word = '0; // Data preloaded from FIFO
 logic out_data_word_first_word = '0; // Header word placed in 'out_data_word'
 logic out_data_word_last_word = '0; // Last word of packet placed in 'out_data_word' 
 logic last_word_is_last = '0; // Set to 1 if last word sent to SPI was last word in packet
+logic can_drop_data = '0; // Set to 1 if current st1 value can be safely dropped (when it is ESC_Wait or ESC_pkt)
 
-assign spi_out_data_word = st1_data;
+assign spi_out_data_word = st1.data;
 assign out_reg_filled = st2.data_active | out_data_word.data_active | req_counters;
 
 assign interf_out.TREADY = !out_data_word.data_active;
@@ -240,19 +253,22 @@ always_ff @(posedge clk) begin
         out_data_word_first_word <= interf_out.TUSER[0];
         out_data_word_last_word <= interf_out.TLAST;
         out_data_word.data_active <= 1'b1; 
-    end else if (req_data && !st2.data_active && !req_counters) out_data_word.data_active <= 1'b0;
+    end else if (req_data && !st1.data_active && !st2.data_active && !req_counters) begin
+        out_data_word.data_active <= 1'b0;
+    end
 end
 
 assign grant_counters = req_counters & !st2.data_active & req_data;
 
 // Data request - fill st1
 always_ff @(posedge clk) begin
-    if (req_data) begin
+    if (req_data && !st1.data_active) begin
+        can_drop_data <= 1'b0; // Assume valid data
         if (st2.data_active) begin // 2nd word os ESC sequence always has a precidence
-            st1_data <= st2.data;
+            st1.data <= st2.data;
             st2.data_active <= 1'b0;
         end else if (req_counters) begin // Emit Stat ESC
-            st1_data <= {OutESC, ET_Stat};
+            st1.data <= {OutESC, ET_Stat};
             st2.data <= StatusPayload'{
                 padding: '0,
                 errors: errors,
@@ -262,18 +278,22 @@ always_ff @(posedge clk) begin
             }; st2.data_active <= 1'b1;
         end else if (out_data_word.data_active) begin // Send Data
             if (out_data_word_first_word) begin // Send as Esc Header
-                st1_data <= {OutESC, ET_Data};
+                st1.data <= {OutESC, ET_Data};
                 st2.data <= out_data_word.data; st2.data_active <= 1'b1;
             end else if (out_data_word.data[31:2] == OutESC) begin // Send as ESC Data sequence
-                st1_data <= {OutESC, ET_Data};
-                st2.data <= {30'h0, out_data_word.data[1:0]}; st2.data_active <= 1'b1;                
+                st1.data <= {OutESC, ET_Data};
+                st2.data <= {30'h0, out_data_word.data[1:0]}; st2.data_active <= 1'b1;
             end else begin // Send as is
-                st1_data <= out_data_word.data;
+                st1.data <= out_data_word.data;
             end
             last_word_is_last <= out_data_word_last_word;
         end else begin // Send 'empty' ESC
-            st1_data <= {OutESC, last_word_is_last ? ET_Pkt : ET_Wait};
+            st1.data <= {OutESC, last_word_is_last ? ET_Pkt : ET_Wait};
+            can_drop_data <= 1'b1;                
         end
+        st1.data_active <= 1'b1;
+    end else if (data_sent || (frame_end && can_drop_data)) begin
+        st1.data_active <= 1'b0;
     end
 end
 
