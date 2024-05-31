@@ -140,7 +140,7 @@ assign spi_data_int = out_reg_filled | (fpga2host_fifo_filled != 0);
 
 spi_fifo_ctrl sfc(
     .clk, .spi_clk, .spi_mosi, .spi_miso(spi_stat_miso), .spi_int(spi_stat_int), .spi_cs, .spi_frame,
-    .spi_cs_resync(data_cs), .spi_frame_resync(spi_frame_resync),
+//    .spi_cs_resync(data_cs), .spi_frame_resync(spi_frame_resync),
     .fpga2host_fifo_filled, .host2fpga_fifo_empty,
     .req_counters, .grant_counters,
     .clr_errors,
@@ -441,8 +441,8 @@ module spi_fifo_ctrl(
     output wire spi_int,  // Emit 'has HOST->FPGA input space' signal (active is 1)
 
     // Resync version of some SPI control
-    input wire spi_cs_resync,
-    input wire spi_frame_resync,
+//    input wire spi_cs_resync,
+//    input wire spi_frame_resync,
 
     // FIFO status feeds
     input wire [9:0] fpga2host_fifo_filled,
@@ -518,8 +518,32 @@ end
 
 
 ///// Stat auto request handler
+logic latch_stat_cntr_ff = '0;
+logic stat_cntr_resync;
+logic stat_send_req;
+logic req_counters_reg = '0;
+assign req_counters = req_counters_reg;
 
+always_ff @(negedge spi_clk) begin
+    if (latch_stat_cntr) latch_stat_cntr_ff <= ~latch_stat_cntr_ff;
+end
 
+cdc_sync #("TOGGLE") stat_resync(.clk, .in(latch_stat_cntr_ff), .out(stat_cntr_resync));
+
+`PEDGE(expl_stat_latch, grant_counters);
+
+spi_stat_ctrs_reloader spi_scr(
+    .clk,
+    .latch(stat_cntr_resync | expl_stat_latch),
+    .stat_send_req,
+    .fpga2host_fifo_filled,
+    .host2fpga_fifo_empty
+);
+
+always_ff @(posedge clk) begin
+    if (stat_send_req) req_counters_reg <= 1'b1; else
+    if (grant_counters) req_counters_reg <= 1'b0;
+end
 
 endmodule
 
@@ -568,3 +592,13 @@ end
 cdc_sync #("TOGGLE") sync_clear(.clk, .in(spi_cmd_clear), .out(clr_errors));
 endmodule
 
+// Implement auto sender of SPI FIFO stat
+module spi_stat_ctrs_reloader (
+    input wire clk,
+    input wire latch, // Counters was sent to Host
+    input wire [9:0] fpga2host_fifo_filled, // Counters
+    input wire [9:0] host2fpga_fifo_empty,
+    output wire stat_send_req // Request to send counters update
+);
+
+endmodule
