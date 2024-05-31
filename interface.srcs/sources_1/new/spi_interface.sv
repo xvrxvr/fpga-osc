@@ -86,7 +86,7 @@ logic spi_data_miso, spi_stat_miso;
 logic spi_data_int, spi_stat_int;
 
 assign spi_miso = spi_frame ? spi_stat_miso : spi_data_miso;
-assign spi_int = spi_frame ? spi_stat_frame : spi_data_frame;
+assign spi_int = spi_frame ? spi_stat_int : spi_data_int;
 
 /// Cross domain signals ///
 // Sources for hold register
@@ -120,8 +120,8 @@ cdc_sync spi_frame_sync(.clk, .in(spi_frame), .out(spi_frame_resync));
 `NEDGE(spi_frame_start, spi_frame_resync);
 `PEDGE(spi_frame_end, spi_frame_resync);
 
-logic req_counters, grant_counters,
-
+logic req_counters;
+logic grant_counters;
 
 body_out body_out_imp(
     .clk, .fpga2host_fifo_filled, .host2fpga_fifo_empty, 
@@ -143,7 +143,8 @@ spi_fifo_ctrl sfc(
     .spi_cs_resync(data_cs), .spi_frame_resync(spi_frame_resync),
     .fpga2host_fifo_filled, .host2fpga_fifo_empty,
     .req_counters, .grant_counters,
-    .clr_errors);
+    .clr_errors,
+    .err_scale, .out_reg_filled);
 
 //////////////////////////////////////////////////////////////////////////////////////////
 // Input path - Host -> FPGA
@@ -363,7 +364,7 @@ module body_input(
 logic is_cmd = '0; // Set to 1 if currently active command streamed from SPI to FIFO. Set to 0 if first word was 0 (bits 30..0)
 logic is_header = '0; // Current word is a Header (put 1 to TUSER)
 logic [31:0] data_to_send = '0; // Data from SPI frontend to send to FIFO
-logic [5:0] tdest = '0; // TDEST part of header
+logic [7:0] tdest = '0; // TDEST part of header
 logic data_rdy_to_send = '0; // data_to_send is holding vaild data (but TLAST cound be not known yet)
 wire data_rdy_to_send_eff = data_rdy_to_send && is_cmd; // Do we really want to send this data?
 logic tlast_to_send = '0; // TLAST value to send
@@ -409,6 +410,17 @@ assign interf.TUSER = is_header ? '1 : '0;
 
 endmodule
 ////////////////////////////////////////////////////
+class BinGrayCvt #(parameter WIDTH=32);
+    static function logic [WIDTH-1:0] bin2gray(input logic [WIDTH-1:0] bin);
+        return bin ^ (bin>>1);
+    endfunction
+    static function logic [WIDTH-1:0] gray2bin(input logic [WIDTH-1:0] gray);
+        logic [WIDTH-1:0] result;
+        result[WIDTH-1] = gray[WIDTH-1];
+        for(int i=WIDTH-2; i>0; --i) result[i] = result[i+1] ^ gray[i];
+        return result;
+    endfunction
+endclass
 
 // 8 bit FIFO Status interface
 // Implements:
@@ -439,15 +451,97 @@ module spi_fifo_ctrl(
     // Rest of control
     output wire req_counters, // Set to 1 if output channel should emit FIFO Status ESC record
     input wire grant_counters, // Answer for 'req_counter'. 'req_counter' should be held in 1 until this signal will be set to 1
-    output wire clr_errors // Clear all error status bits
+    output wire clr_errors, // Clear all error status bits
+
+    // Status bits for output
+    input ErrorScale err_scale,
+    inout wire out_reg_filled
 );
 
 ///// Input SPI part
-logic [7:0] spi_reg_data  = '0; // Accumulator for Data word from SPI
-logic [7:0] spi_in_shift_reg = '0; // Shift register for SPI
+logic [6:0] spi_reg_threshold;
+
+spi8_in spi_in(.*);
+
+/////
+assign spi_int = host2fpga_fifo_empty >= spi_reg_threshold;
+
+///// Output SPI part
+logic [4:0] spi_bit_count_out = '0; // Bit counter for SPI out. Includes 3 bits for bit count inside 1 SPI transaction + 2 bit for 4 sequential SPI transaction
+logic [23:0] spi_out_shift_reg = '0; // Output shift register for 2-4 bytes. First byte send by MUX
+wire [1:0] spi_out_byte = spi_bit_count_out[4:3];
+logic spi_out_first_byte; // Value for miso for first output byte
+
+logic [9:0] cpy_fpga2host_fifo_filled;  // Copy of appropriate counters, resynchronized to SPI clock (in Gray code)
+logic [9:0] cpy_host2fpga_fifo_empty;
+
+wire latch_stat_cntr = spi_frame && !spi_cs && spi_bit_count_out == '0; // Latch fpga2host_fifo_filled and host2fpga_fifo_empty here
+
+always_ff @(negedge spi_clk or negedge spi_frame) begin
+    if (!spi_frame) spi_bit_count_out <= '0; else 
+    if (!spi_cs) spi_bit_count_out <= spi_bit_count_out + 1'b1;
+end
+
+// MUX for first byte
+always_comb 
+    case(spi_bit_count_out[2:0])
+        3'd0: spi_out_first_byte = err_scale.host2fpga_overflow;
+        3'd1: spi_out_first_byte = err_scale.fpga2host_overflow;
+        3'd2: spi_out_first_byte = out_reg_filled;
+        3'd7: spi_out_first_byte = 1'b1;
+        default: spi_out_first_byte = 1'b0;
+    endcase
+
+assign spi_miso = spi_out_byte == '0 ? spi_out_first_byte : spi_out_shift_reg[0];
+
+// Latch stat counters on first SPI transaction.
+always_ff @(negedge spi_clk) begin
+    if (latch_stat_cntr) begin 
+        cpy_fpga2host_fifo_filled <= BinGrayCvt #(10)::bin2gray(fpga2host_fifo_filled);
+        cpy_host2fpga_fifo_empty <= BinGrayCvt #(10)::bin2gray(host2fpga_fifo_empty);                
+    end
+end
+
+// Out shift reg implementation
+always_ff @(negedge spi_clk) begin
+    if (spi_frame && spi_cs) begin
+        if (spi_bit_count_out == 5'h6) begin
+            automatic logic [9:0] f2h = BinGrayCvt #(10)::gray2bin(cpy_fpga2host_fifo_filled);
+            automatic logic [9:0] h2f = BinGrayCvt #(10)::gray2bin(cpy_host2fpga_fifo_empty);
+            spi_out_shift_reg <= {2'b0, h2f[9:7], f2h[9:7], 1'b0, f2h[6:0], 1'b0, h2f[6:0]};
+        end else if (spi_out_byte != '0) begin
+            spi_out_shift_reg <= spi_out_shift_reg >> 1;
+        end
+    end
+end
+
+
+
+///// Stat auto request handler
+
+
+
+endmodule
+
+
+///// Input SPI part
+module spi8_in( 
+    input wire clk,
+
+    // SPI physical interface
+    input wire spi_clk,
+    input wire spi_mosi,
+    input wire spi_cs,    
+    input wire spi_frame, // Frame signal. SPI addressed only when Frame is 1
+
+    output wire clr_errors,
+    output reg [6:0] spi_reg_threshold
+);
+
+logic [6:0] spi_reg_data  = '0; // Accumulator for Data word from SPI
+logic [6:0] spi_in_shift_reg = '0; // Shift register for SPI
 logic [2:0] spi_bit_count = '0; // Bit counter in SPI transaction
 logic       spi_cmd_clear = '0; // Toggle bit for 'clear' system register
-logic [7:0] spi_reg_threshold = '0; // Treshold for 'int' generation
 
 wire spi_cs_eff = ~spi_cs & spi_frame; // Enable SPI
 
@@ -456,7 +550,7 @@ always_ff @(posedge spi_clk or negedge spi_cs_eff) begin
     else spi_bit_count <= spi_bit_count + 1'b1;
 end
 
-always_ff @(posedge spi_clk) spi_in_shift_reg <= {spi_mosi, spi_in_shift_reg[6:0]};
+always_ff @(posedge spi_clk) spi_in_shift_reg <= {spi_mosi, spi_in_shift_reg[6:1]};
 
 always_ff @(posedge spi_clk) begin
     if (spi_bit_count == 3'd7 && spi_mosi == 0) spi_reg_data <= spi_in_shift_reg;
@@ -472,13 +566,5 @@ always_ff @(posedge spi_clk) begin
 end
 
 cdc_sync #("TOGGLE") sync_clear(.clk, .in(spi_cmd_clear), .out(clr_errors));
-/////
-assign spi_int = host2fpga_fifo_empty >= spi_reg_threshold;
-
-///// Output SPI part
-
-///// Stat auto request handler
-
-
-
 endmodule
+

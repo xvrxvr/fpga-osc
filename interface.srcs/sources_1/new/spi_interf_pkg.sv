@@ -35,7 +35,7 @@ typedef struct packed {
     logic one; // Should be 1
 } FifoCtrlSPIW1;
 
-typedef enum logic [5:0] {
+typedef enum logic [7:0] {
     DST_SYSTEM,
     DST_LA,
     DST_SEQ,

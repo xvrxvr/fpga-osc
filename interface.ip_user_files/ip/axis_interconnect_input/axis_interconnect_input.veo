@@ -63,7 +63,7 @@ axis_interconnect_input your_instance_name (
   .S00_AXIS_TREADY(S00_AXIS_TREADY),                    // output wire S00_AXIS_TREADY
   .S00_AXIS_TDATA(S00_AXIS_TDATA),                      // input wire [31 : 0] S00_AXIS_TDATA
   .S00_AXIS_TLAST(S00_AXIS_TLAST),                      // input wire S00_AXIS_TLAST
-  .S00_AXIS_TDEST(S00_AXIS_TDEST),                      // input wire [5 : 0] S00_AXIS_TDEST
+  .S00_AXIS_TDEST(S00_AXIS_TDEST),                      // input wire [7 : 0] S00_AXIS_TDEST
   .S00_AXIS_TUSER(S00_AXIS_TUSER),                      // input wire [3 : 0] S00_AXIS_TUSER
   .M00_AXIS_ACLK(M00_AXIS_ACLK),                        // input wire M00_AXIS_ACLK
   .M01_AXIS_ACLK(M01_AXIS_ACLK),                        // input wire M01_AXIS_ACLK
@@ -95,11 +95,11 @@ axis_interconnect_input your_instance_name (
   .M02_AXIS_TLAST(M02_AXIS_TLAST),                      // output wire M02_AXIS_TLAST
   .M03_AXIS_TLAST(M03_AXIS_TLAST),                      // output wire M03_AXIS_TLAST
   .M04_AXIS_TLAST(M04_AXIS_TLAST),                      // output wire M04_AXIS_TLAST
-  .M00_AXIS_TDEST(M00_AXIS_TDEST),                      // output wire [5 : 0] M00_AXIS_TDEST
-  .M01_AXIS_TDEST(M01_AXIS_TDEST),                      // output wire [5 : 0] M01_AXIS_TDEST
-  .M02_AXIS_TDEST(M02_AXIS_TDEST),                      // output wire [5 : 0] M02_AXIS_TDEST
-  .M03_AXIS_TDEST(M03_AXIS_TDEST),                      // output wire [5 : 0] M03_AXIS_TDEST
-  .M04_AXIS_TDEST(M04_AXIS_TDEST),                      // output wire [5 : 0] M04_AXIS_TDEST
+  .M00_AXIS_TDEST(M00_AXIS_TDEST),                      // output wire [7 : 0] M00_AXIS_TDEST
+  .M01_AXIS_TDEST(M01_AXIS_TDEST),                      // output wire [7 : 0] M01_AXIS_TDEST
+  .M02_AXIS_TDEST(M02_AXIS_TDEST),                      // output wire [7 : 0] M02_AXIS_TDEST
+  .M03_AXIS_TDEST(M03_AXIS_TDEST),                      // output wire [7 : 0] M03_AXIS_TDEST
+  .M04_AXIS_TDEST(M04_AXIS_TDEST),                      // output wire [7 : 0] M04_AXIS_TDEST
   .M00_AXIS_TUSER(M00_AXIS_TUSER),                      // output wire [3 : 0] M00_AXIS_TUSER
   .M01_AXIS_TUSER(M01_AXIS_TUSER),                      // output wire [3 : 0] M01_AXIS_TUSER
   .M02_AXIS_TUSER(M02_AXIS_TUSER),                      // output wire [3 : 0] M02_AXIS_TUSER

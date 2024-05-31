@@ -1,4 +1,4 @@
-verilog xil_defaultlib --include "../../../ipstatic/hdl" \
+verilog xil_defaultlib --include "Z:/Xilinx/Vivado/2023.2/data/xilinx_vip/include" --include "../../../ipstatic/hdl" \
 "../../../../interface.gen/sources_1/ip/axis_interconnect_input/sim/axis_interconnect_input.v" \
 
 verilog xil_defaultlib "glbl.v"

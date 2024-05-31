@@ -87,11 +87,11 @@ axis_interconnect_output your_instance_name (
   .S02_AXIS_TLAST(S02_AXIS_TLAST),              // input wire S02_AXIS_TLAST
   .S03_AXIS_TLAST(S03_AXIS_TLAST),              // input wire S03_AXIS_TLAST
   .S04_AXIS_TLAST(S04_AXIS_TLAST),              // input wire S04_AXIS_TLAST
-  .S00_AXIS_TDEST(S00_AXIS_TDEST),              // input wire [5 : 0] S00_AXIS_TDEST
-  .S01_AXIS_TDEST(S01_AXIS_TDEST),              // input wire [5 : 0] S01_AXIS_TDEST
-  .S02_AXIS_TDEST(S02_AXIS_TDEST),              // input wire [5 : 0] S02_AXIS_TDEST
-  .S03_AXIS_TDEST(S03_AXIS_TDEST),              // input wire [5 : 0] S03_AXIS_TDEST
-  .S04_AXIS_TDEST(S04_AXIS_TDEST),              // input wire [5 : 0] S04_AXIS_TDEST
+  .S00_AXIS_TDEST(S00_AXIS_TDEST),              // input wire [7 : 0] S00_AXIS_TDEST
+  .S01_AXIS_TDEST(S01_AXIS_TDEST),              // input wire [7 : 0] S01_AXIS_TDEST
+  .S02_AXIS_TDEST(S02_AXIS_TDEST),              // input wire [7 : 0] S02_AXIS_TDEST
+  .S03_AXIS_TDEST(S03_AXIS_TDEST),              // input wire [7 : 0] S03_AXIS_TDEST
+  .S04_AXIS_TDEST(S04_AXIS_TDEST),              // input wire [7 : 0] S04_AXIS_TDEST
   .S00_AXIS_TUSER(S00_AXIS_TUSER),              // input wire [3 : 0] S00_AXIS_TUSER
   .S01_AXIS_TUSER(S01_AXIS_TUSER),              // input wire [3 : 0] S01_AXIS_TUSER
   .S02_AXIS_TUSER(S02_AXIS_TUSER),              // input wire [3 : 0] S02_AXIS_TUSER
@@ -103,7 +103,7 @@ axis_interconnect_output your_instance_name (
   .M00_AXIS_TREADY(M00_AXIS_TREADY),            // input wire M00_AXIS_TREADY
   .M00_AXIS_TDATA(M00_AXIS_TDATA),              // output wire [31 : 0] M00_AXIS_TDATA
   .M00_AXIS_TLAST(M00_AXIS_TLAST),              // output wire M00_AXIS_TLAST
-  .M00_AXIS_TDEST(M00_AXIS_TDEST),              // output wire [5 : 0] M00_AXIS_TDEST
+  .M00_AXIS_TDEST(M00_AXIS_TDEST),              // output wire [7 : 0] M00_AXIS_TDEST
   .M00_AXIS_TUSER(M00_AXIS_TUSER),              // output wire [3 : 0] M00_AXIS_TUSER
   .S00_ARB_REQ_SUPPRESS(S00_ARB_REQ_SUPPRESS),  // input wire S00_ARB_REQ_SUPPRESS
   .S01_ARB_REQ_SUPPRESS(S01_ARB_REQ_SUPPRESS),  // input wire S01_ARB_REQ_SUPPRESS
