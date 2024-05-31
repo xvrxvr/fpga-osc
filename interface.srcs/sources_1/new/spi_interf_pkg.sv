@@ -20,20 +20,11 @@ typedef struct packed {
 } ErrorScale;
 
 typedef struct packed {
-    logic [8:0] padding;
+    logic [9:0] padding;
     ErrorScale errors;
-    logic buf_reg_filled; // Intermidiate buffer register filled
     logic [9:0] fpga2host_fifo_filled;
     logic [9:0] host2fpga_fifo_empty;
 } StatusPayload;
-
-// FIFO ctrl SPI data words
-typedef struct packed {
-    ErrorScale errors;
-    logic buf_reg_filled; // Intermidiate buffer register filled
-    logic [3:0] zero; // Should be 0
-    logic one; // Should be 1
-} FifoCtrlSPIW1;
 
 typedef enum logic [7:0] {
     DST_SYSTEM,

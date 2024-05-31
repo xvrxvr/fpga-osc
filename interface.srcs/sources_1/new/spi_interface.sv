@@ -106,7 +106,6 @@ spi_out spi_out_inst(.spi_clk, .spi_miso(spi_data_miso), .spi_cs(spi_cs | spi_fr
 // Resync spi_out_data_req and spi_frame to 'clk' domain
 logic spi_out_data_req_clk;
 logic data_cs;
-logic out_reg_filled;
 logic data_sent;
 
 cdc_sync input_resync_cs_cdc(.clk, .in(spi_cs), .out(data_cs));
@@ -125,7 +124,7 @@ logic grant_counters;
 
 body_out body_out_imp(
     .clk, .fpga2host_fifo_filled, .host2fpga_fifo_empty, 
-    .spi_out_data_word, .out_reg_filled, .data_sent,
+    .spi_out_data_word, .data_sent,
     .req_data(spi_out_data_req_clk | spi_frame_start), 
     .frame_end(spi_frame_end),
     .req_counters,
@@ -134,17 +133,16 @@ body_out body_out_imp(
     .errors(err_scale)
 );
 
-assign spi_data_int = out_reg_filled | (fpga2host_fifo_filled != 0);
+assign spi_data_int = fpga2host_fifo_filled != 0;
 //////////////////////////////////////////////////////////////////////////////////////////
 // 8 bit FIFO control
 
 spi_fifo_ctrl sfc(
     .clk, .spi_clk, .spi_mosi, .spi_miso(spi_stat_miso), .spi_int(spi_stat_int), .spi_cs, .spi_frame,
-//    .spi_cs_resync(data_cs), .spi_frame_resync(spi_frame_resync),
     .fpga2host_fifo_filled, .host2fpga_fifo_empty,
     .req_counters, .grant_counters,
     .clr_errors,
-    .err_scale, .out_reg_filled);
+    .err_scale);
 
 //////////////////////////////////////////////////////////////////////////////////////////
 // Input path - Host -> FPGA
@@ -245,10 +243,8 @@ module body_out(
     input wire req_counters,
     output wire grant_counters,
     
-    input ErrorScale errors,
-    
-    output wire out_reg_filled
-);
+    input ErrorScale errors
+ );
 `UNUSED({interf_out.TUSER, interf_out.TDEST});
 
 typedef struct packed {
@@ -256,30 +252,13 @@ typedef struct packed {
     logic data_active;
 } SPIData;
 
-SPIData st1 = '0, st2 = '0; // 2nd word os ESC of Data to send to SPI
-SPIData out_data_word = '0; // Data preloaded from FIFO
-logic out_data_word_first_word = '0; // Header word placed in 'out_data_word'
-logic out_data_word_last_word = '0; // Last word of packet placed in 'out_data_word' 
+SPIData st1 = '0, st2 = '0; // 1st and 2nd word of ESC of Data (or Data itself) to send to SPI
 logic last_word_is_last = '0; // Set to 1 if last word sent to SPI was last word in packet
 logic can_drop_data = '0; // Set to 1 if current st1 value can be safely dropped (when it is ESC_Wait or ESC_pkt)
 
 assign spi_out_data_word = st1.data;
-assign out_reg_filled = st2.data_active | out_data_word.data_active | req_counters;
-
-assign interf_out.TREADY = !out_data_word.data_active;
-
-always_ff @(posedge clk) begin
-    if (!out_data_word.data_active & interf_out.TVALID) begin 
-        out_data_word.data <= interf_out.TDATA; 
-        out_data_word_first_word <= interf_out.TUSER[0];
-        out_data_word_last_word <= interf_out.TLAST;
-        out_data_word.data_active <= 1'b1; 
-    end else if (req_data && !st1.data_active && !st2.data_active && !req_counters) begin
-        out_data_word.data_active <= 1'b0;
-    end
-end
-
-assign grant_counters = req_counters & !st2.data_active & req_data;
+assign interf_out.TREADY = req_data && !st1.data_active && !st2.data_active && !req_counters;
+assign grant_counters = req_counters && !st2.data_active && req_data;
 
 // Data request - fill st1
 always_ff @(posedge clk) begin
@@ -293,21 +272,20 @@ always_ff @(posedge clk) begin
             st2.data <= StatusPayload'{
                 padding: '0,
                 errors: errors,
-                buf_reg_filled: out_data_word.data_active,
                 fpga2host_fifo_filled: fpga2host_fifo_filled,
                 host2fpga_fifo_empty: host2fpga_fifo_empty            
             }; st2.data_active <= 1'b1;
-        end else if (out_data_word.data_active) begin // Send Data
-            if (out_data_word_first_word) begin // Send as Esc Header
+        end else if (interf_out.TVALID) begin // Send Data
+            if (interf_out.TUSER[0]) begin // Send as Esc Header
                 st1.data <= {OutESC, ET_Data};
-                st2.data <= out_data_word.data; st2.data_active <= 1'b1;
-            end else if (out_data_word.data[31:2] == OutESC) begin // Send as ESC Data sequence
+                st2.data <= interf_out.TDATA; st2.data_active <= 1'b1;
+            end else if (interf_out.TDATA[31:2] == OutESC) begin // Send as ESC Data sequence
                 st1.data <= {OutESC, ET_Data};
-                st2.data <= {30'h0, out_data_word.data[1:0]}; st2.data_active <= 1'b1;
+                st2.data <= {30'h0, interf_out.TDATA[1:0]}; st2.data_active <= 1'b1;
             end else begin // Send as is
-                st1.data <= out_data_word.data;
+                st1.data <= interf_out.TDATA;
             end
-            last_word_is_last <= out_data_word_last_word;
+            last_word_is_last <= interf_out.TLAST;
         end else begin // Send 'empty' ESC
             st1.data <= {OutESC, last_word_is_last ? ET_Pkt : ET_Wait};
             can_drop_data <= 1'b1;                
@@ -454,8 +432,7 @@ module spi_fifo_ctrl(
     output wire clr_errors, // Clear all error status bits
 
     // Status bits for output
-    input ErrorScale err_scale,
-    inout wire out_reg_filled
+    input ErrorScale err_scale
 );
 
 ///// Input SPI part
@@ -487,7 +464,6 @@ always_comb
     case(spi_bit_count_out[2:0])
         3'd0: spi_out_first_byte = err_scale.host2fpga_overflow;
         3'd1: spi_out_first_byte = err_scale.fpga2host_overflow;
-        3'd2: spi_out_first_byte = out_reg_filled;
         3'd7: spi_out_first_byte = 1'b1;
         default: spi_out_first_byte = 1'b0;
     endcase
