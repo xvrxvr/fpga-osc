@@ -39,12 +39,23 @@ function automatic [7:0] get_dest(CmdPkt cmd);
 endfunction 
 
 const logic [29:0] OutESC = 30'h28C9484F;
+const logic [30:0] InESC =  31'h7FC9484F;
 
 typedef enum logic [1:0] {
     ET_Data,
     ET_Stat,
     ET_Wait,
     ET_Pkt
-} SECTyope;
+} SECType;
+
+typedef enum logic {
+    IET_Data,
+    IET_Skip
+} SECInType;
+
+typedef struct packed {
+    logic [5:0] unused;
+    logic use_in_esc;
+} SPI_FIFO_Ctrl;
 
 endpackage

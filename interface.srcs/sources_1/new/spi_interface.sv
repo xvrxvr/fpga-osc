@@ -71,6 +71,9 @@ module spi_interface(
 logic clr_errors;
 ErrorScale err_scale = '0;
 
+// FIFO stat control
+SPI_FIFO_Ctrl ctrl_reg;
+
 ///////////////////////////////////////////
 // SPI frontend - Output path (FPGA -> HOST)
 //  Data to send - one of
@@ -118,6 +121,7 @@ cdc_sync spi_frame_sync(.clk, .in(spi_frame), .out(spi_frame_resync));
 
 `NEDGE(spi_frame_start, spi_frame_resync);
 `PEDGE(spi_frame_end, spi_frame_resync);
+`PEDGE(data_cs_end, data_cs);
 
 logic req_counters;
 logic grant_counters;
@@ -141,8 +145,10 @@ spi_fifo_ctrl sfc(
     .clk, .spi_clk, .spi_mosi, .spi_miso(spi_stat_miso), .spi_int(spi_stat_int), .spi_cs, .spi_frame,
     .fpga2host_fifo_filled, .host2fpga_fifo_empty,
     .req_counters, .grant_counters,
+    .spi_data_cs_stb_resync(data_cs_end & spi_frame_resync),
     .clr_errors,
-    .err_scale);
+    .err_scale,
+    .ctrl_reg);
 
 //////////////////////////////////////////////////////////////////////////////////////////
 // Input path - Host -> FPGA
@@ -161,7 +167,8 @@ body_input body_input_imp(.clk,
     .data_frame(spi_frame_resync),
     .data_stb(data_stb_resync),
     .interf(interf_host2fpga), 
-    .overflow_error(input_overflow_stb)     
+    .overflow_error(input_overflow_stb),
+    .enable_esc(ctrl_reg.use_in_esc)     
 );
 
 // Error processing
@@ -333,6 +340,7 @@ module body_input(
     input wire data_stb, // Strobe for input data ready
     input wire data_cs,  // CS from SPI
     input wire data_frame, // FRAME from SPI
+    input wire enable_esc, // Enable processing of InpESC words
 
     AXIStream.master interf,
     
@@ -347,6 +355,7 @@ logic data_rdy_to_send = '0; // data_to_send is holding vaild data (but TLAST co
 wire data_rdy_to_send_eff = data_rdy_to_send && is_cmd; // Do we really want to send this data?
 logic tlast_to_send = '0; // TLAST value to send
 logic tlast_ready = '0; // data_to_send and tlast_to_send was set up - data can be pushed to FIFO
+logic is_in_data_esc = '0; // Set to 1 if we expect 2nd word of InESC of type Data
 
 `NEDGE(frame_start, data_frame);
 `PEDGE(frame_end, data_frame);
@@ -362,12 +371,19 @@ always_ff @(posedge clk) begin
 end
 
 always_ff @(posedge clk) begin
-    if (data_stb) begin 
-        data_to_send <= data; 
-        if (is_header) begin is_cmd <= data != 0; tdest <= get_dest(data); end
-        data_rdy_to_send <= 1'b1; 
-    end
-    else if (data_pushed_to_fifo) begin
+    if (data_stb) begin
+        if (enable_esc && data[31:1] == InESC) begin // Some ESC code
+            if (data[0] == IET_Data) begin // This is Data escape. Otherwise it is Skip (just do nothing)
+                // Right now we do not analyse data payload, just set app bit
+                is_in_data_esc <= 1'b1;
+            end
+        end else begin 
+            data_to_send <= is_in_data_esc ? {InESC, data[0]} : data; 
+            if (is_header) begin is_cmd <= data != 0; tdest <= get_dest(data); end
+            data_rdy_to_send <= 1'b1;
+            is_in_data_esc <= 1'b0;
+        end 
+    end else if (data_pushed_to_fifo) begin
         data_rdy_to_send <= 1'b0;
     end
 end
@@ -388,6 +404,8 @@ assign interf.TUSER = is_header ? '1 : '0;
 
 endmodule
 ////////////////////////////////////////////////////
+
+/*
 class BinGrayCvt #(parameter WIDTH=32);
     static function logic [WIDTH-1:0] bin2gray(input logic [WIDTH-1:0] bin);
         return bin ^ (bin>>1);
@@ -399,6 +417,7 @@ class BinGrayCvt #(parameter WIDTH=32);
         return result;
     endfunction
 endclass
+*/
 
 // 8 bit FIFO Status interface
 // Implements:
@@ -419,6 +438,7 @@ module spi_fifo_ctrl(
     output wire spi_int,  // Emit 'has HOST->FPGA input space' signal (active is 1)
 
     // Resync version of some SPI control
+    input wire spi_data_cs_stb_resync,
 //    input wire spi_cs_resync,
 //    input wire spi_frame_resync,
 
@@ -430,6 +450,7 @@ module spi_fifo_ctrl(
     output wire req_counters, // Set to 1 if output channel should emit FIFO Status ESC record
     input wire grant_counters, // Answer for 'req_counter'. 'req_counter' should be held in 1 until this signal will be set to 1
     output wire clr_errors, // Clear all error status bits
+    output SPI_FIFO_Ctrl ctrl_reg,
 
     // Status bits for output
     input ErrorScale err_scale
@@ -461,7 +482,7 @@ end
 
 // MUX for first byte
 always_comb 
-    case(spi_bit_count_out[2:0])
+    unique case(spi_bit_count_out[2:0])
         3'd0: spi_out_first_byte = err_scale.host2fpga_overflow;
         3'd1: spi_out_first_byte = err_scale.fpga2host_overflow;
         3'd7: spi_out_first_byte = 1'b1;
@@ -473,8 +494,8 @@ assign spi_miso = spi_out_byte == '0 ? spi_out_first_byte : spi_out_shift_reg[0]
 // Latch stat counters on first SPI transaction.
 always_ff @(negedge spi_clk) begin
     if (latch_stat_cntr) begin 
-        cpy_fpga2host_fifo_filled <= BinGrayCvt #(10)::bin2gray(fpga2host_fifo_filled);
-        cpy_host2fpga_fifo_empty <= BinGrayCvt #(10)::bin2gray(host2fpga_fifo_empty);                
+        cpy_fpga2host_fifo_filled <= fpga2host_fifo_filled;
+        cpy_host2fpga_fifo_empty <= host2fpga_fifo_empty;                
     end
 end
 
@@ -482,9 +503,10 @@ end
 always_ff @(negedge spi_clk) begin
     if (spi_frame && spi_cs) begin
         if (spi_bit_count_out == 5'h6) begin
-            automatic logic [9:0] f2h = BinGrayCvt #(10)::gray2bin(cpy_fpga2host_fifo_filled);
-            automatic logic [9:0] h2f = BinGrayCvt #(10)::gray2bin(cpy_host2fpga_fifo_empty);
-            spi_out_shift_reg <= {2'b0, h2f[9:7], f2h[9:7], 1'b0, f2h[6:0], 1'b0, h2f[6:0]};
+            spi_out_shift_reg <= {
+                2'b0, cpy_fpga2host_fifo_filled[9:7], cpy_host2fpga_fifo_empty[9:7], 
+                1'b0, cpy_host2fpga_fifo_empty[6:0], 
+                1'b0, cpy_fpga2host_fifo_filled[6:0]};
         end else if (spi_out_byte != '0) begin
             spi_out_shift_reg <= spi_out_shift_reg >> 1;
         end
@@ -512,6 +534,7 @@ spi_stat_ctrs_reloader spi_scr(
     .clk,
     .latch(stat_cntr_resync | expl_stat_latch),
     .stat_send_req,
+    .counter_dec(spi_data_cs_stb_resync),
     .fpga2host_fifo_filled,
     .host2fpga_fifo_empty
 );
@@ -535,13 +558,17 @@ module spi8_in(
     input wire spi_frame, // Frame signal. SPI addressed only when Frame is 1
 
     output wire clr_errors,
-    output reg [6:0] spi_reg_threshold
+    output reg [6:0] spi_reg_threshold,
+    output SPI_FIFO_Ctrl ctrl_reg
 );
 
 logic [6:0] spi_reg_data  = '0; // Accumulator for Data word from SPI
 logic [6:0] spi_in_shift_reg = '0; // Shift register for SPI
 logic [2:0] spi_bit_count = '0; // Bit counter in SPI transaction
 logic       spi_cmd_clear = '0; // Toggle bit for 'clear' system register
+SPI_FIFO_Ctrl ctrl_reg_bkp = '0;
+
+assign ctrl_reg = ctrl_reg_bkp;
 
 wire spi_cs_eff = ~spi_cs & spi_frame; // Enable SPI
 
@@ -558,9 +585,11 @@ end
 
 always_ff @(posedge spi_clk) begin
     if (spi_bit_count == 3'd7 && spi_mosi == 1) begin
-        case(spi_in_shift_reg)
+        unique case(spi_in_shift_reg)
             6'd0: spi_reg_threshold <= spi_reg_data;
             6'd1: spi_cmd_clear <= ~spi_cmd_clear;
+            6'd2: ctrl_reg_bkp <= spi_reg_data;
+            default: ;
         endcase
     end
 end
@@ -572,9 +601,29 @@ endmodule
 module spi_stat_ctrs_reloader (
     input wire clk,
     input wire latch, // Counters was sent to Host
+    input wire counter_dec, // Decrement counter
     input wire [9:0] fpga2host_fifo_filled, // Counters
     input wire [9:0] host2fpga_fifo_empty,
     output wire stat_send_req // Request to send counters update
 );
+
+logic [11:0] cnt_f2h = '0; // Counter of bytes in host2fpga_fifo_empty FIFO
+logic [11:0] cnt_h2f = '0; // Counter of bytes in host2fpga_fifo_empty
+
+always_ff @(posedge clk) begin
+    if (latch) begin
+        cnt_f2h <= {fpga2host_fifo_filled, 2'b00};
+        cnt_h2f <= {host2fpga_fifo_empty, 2'b00};
+    end else if (counter_dec) begin
+        if (cnt_f2h != '0) cnt_f2h <= cnt_f2h - 1'b1;
+        if (cnt_h2f != '0) cnt_h2f <= cnt_h2f - 1'b1;
+    end
+end
+
+wire hit_signal = (cnt_f2h[11:3] == '0 && fpga2host_fifo_filled[9:1] != '0) || (cnt_h2f[11:3] == '0 && host2fpga_fifo_empty[9:1] != '0) ||
+                  (cnt_f2h == '0 && fpga2host_fifo_filled != '0) || (cnt_h2f == '0 && host2fpga_fifo_empty != '0);
+
+`PEDGE(hit_pulse, hit_signal);
+assign stat_send_req = hit_pulse;
 
 endmodule
