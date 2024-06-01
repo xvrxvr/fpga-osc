@@ -43,7 +43,9 @@ clk_wiz_main (.clk_out1(clk), .clk_in1(clk20));
 
 AXIStream input_axi(), output_axi();
 logic [31:0] fpga2host_fifo_filled; // 0-512
-logic [31:0] host2fpga_fifo_empty; // 0-512
+logic [31:0] host2fpga_fifo_empty, h2ffe; // 0-512
+
+assign host2fpga_fifo_empty = FIFO_SIZE - h2ffe;
 
 spi_interface main_spi_inst(
     .clk,
@@ -165,7 +167,7 @@ axis_interconnect_input axi_input (
   `MAXI(04,input_gen),
   
   .S00_DECODE_ERR(),
-  .S00_FIFO_DATA_COUNT(host2fpga_fifo_empty)
+  .S00_FIFO_DATA_COUNT(h2ffe)
 );
 
 axis_interconnect_output axi_output (

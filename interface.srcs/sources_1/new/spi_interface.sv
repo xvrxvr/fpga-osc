@@ -439,8 +439,6 @@ module spi_fifo_ctrl(
 
     // Resync version of some SPI control
     input wire spi_data_cs_stb_resync,
-//    input wire spi_cs_resync,
-//    input wire spi_frame_resync,
 
     // FIFO status feeds
     input wire [9:0] fpga2host_fifo_filled,

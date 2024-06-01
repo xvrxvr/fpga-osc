@@ -34,6 +34,8 @@ typedef enum logic [7:0] {
     DST_GEN
 } DestTypes;
 
+const logic [31:0] FIFO_SIZE = 32;
+
 function automatic [7:0] get_dest(CmdPkt cmd);
     return cmd.dest;
 endfunction 
