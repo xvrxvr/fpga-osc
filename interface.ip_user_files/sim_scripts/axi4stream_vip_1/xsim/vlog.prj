@@ -1,0 +1,8 @@
+sv xil_defaultlib --include "Z:/Xilinx/Vivado/2023.2/data/xilinx_vip/include" --include "../../../ipstatic/hdl" \
+"../../../../interface.gen/sources_1/ip/axi4stream_vip_1/sim/axi4stream_vip_1_pkg.sv" \
+"../../../../interface.gen/sources_1/ip/axi4stream_vip_1/sim/axi4stream_vip_1.sv" \
+
+verilog xil_defaultlib "glbl.v"
+
+# Do not sort compile order
+nosort

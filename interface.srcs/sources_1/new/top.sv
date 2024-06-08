@@ -45,8 +45,6 @@ AXIStream input_axi(), output_axi();
 logic [31:0] fpga2host_fifo_filled; // 0-512
 logic [31:0] host2fpga_fifo_empty, h2ffe; // 0-512
 
-assign host2fpga_fifo_empty = FIFO_SIZE - h2ffe;
-
 spi_interface main_spi_inst(
     .clk,
     
@@ -169,6 +167,9 @@ axis_interconnect_input axi_input (
   .S00_DECODE_ERR(),
   .S00_FIFO_DATA_COUNT(h2ffe)
 );
+
+assign host2fpga_fifo_empty = FIFO_SIZE - h2ffe;
+//assign host2fpga_fifo_empty = axi_input.inst.C_S00_AXIS_FIFO_DEPTH - h2ffe;
 
 axis_interconnect_output axi_output (
   .ACLK(clk),
