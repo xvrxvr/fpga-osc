@@ -1,5 +1,7 @@
 ﻿`timescale 1ps/1ps
 
+`include "test_setup.vh"
+
 import axi4stream_vip_pkg::*;
 import axi4stream_vip_0_pkg::*;
 
@@ -21,12 +23,32 @@ axi4stream_vip_0_mst_t axi4stream_vip_agent;
 
 initial begin : START_axi4stream_vip_MASTER
   axi4stream_vip_agent = new("axi_master_vip", axi_stream_vip.inst.IF);
-  axi4stream_vip_agent.set_verbosity(400);
-  axi4stream_vip_agent.start_master();
+  axi4stream_vip_agent.set_verbosity(VERB ? 400 : 0);
 end
+
+task check_finish();
+    if (data.size() != 0) begin
+        $error("[AXI Master] <%m> %0t : Transaction not finished", $time);
+        $stop();
+    end
+endtask
+
+task start();
+    axi4stream_vip_agent.start_master();
+endtask
+
+task stop();
+    check_finish();
+    axi4stream_vip_agent.stop_master();
+endtask
+
 
 task send(input logic [31:0] data_);
     data.push_back(data_);
+endtask
+
+task send_array(input logic [31:0] data_[]);
+    for(int i=0; i < data_.size(); ++i) send(data_[i]);
 endtask
 
 task run();
@@ -44,7 +66,6 @@ task run();
         axi4stream_vip_agent.driver.send(wr_transaction);
     end
 endtask
-
 
 endmodule
 

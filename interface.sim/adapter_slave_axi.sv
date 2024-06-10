@@ -1,5 +1,7 @@
 ﻿`timescale 1ps/1ps
 
+`include "test_setup.vh"
+
 import axi4stream_vip_pkg::*;
 import axi4stream_vip_1_pkg::*;
 
@@ -23,19 +25,37 @@ logic [31:0] data[$];
 
 initial begin : START_axi4stream_vip_SLAVE
     axi4stream_vip_agent = new("axi_slave_vip", axi_stream_vip.inst.IF);
-    axi4stream_vip_agent.set_verbosity(400);
+    axi4stream_vip_agent.set_verbosity(VERB ? 400 : 0);
 
     ready_gen = axi4stream_vip_agent.driver.create_ready("ready_gen");
     ready_gen.set_ready_policy(XIL_AXI4STREAM_READY_GEN_NO_BACKPRESSURE) //XIL_AXI4STREAM_READY_GEN_OSC); 
     //ready_gen.set_low_time(1);
     //ready_gen.set_high_time(2);
     axi4stream_vip_agent.driver.send_tready(ready_gen);
-
-    axi4stream_vip_agent.start_slave();
 end
+
+task check_finish();
+    if (data.size() != 0) begin
+        $error("[AXI Slave] <%m> %0t : Transaction not finished", $time);
+        $stop();
+    end
+endtask
+
+task start();
+    axi4stream_vip_agent.start_slave();
+endtask
+
+task stop();
+    check_finish();
+    axi4stream_vip_agent.stop_slave();
+endtask
 
 task expect(input logic [31:0] data_);
     data.push_back(data_);
+endtask
+
+task expect_array(input logic [31:0] data_[]);
+    for(int i=0; i < data_.size(); ++i) expect(data_[i]);
 endtask
 
 task run();
@@ -59,8 +79,6 @@ task run();
         end
     end
 endtask
-
-
 
 endmodule
 

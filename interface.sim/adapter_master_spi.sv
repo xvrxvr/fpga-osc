@@ -1,7 +1,7 @@
 `timescale 1ns / 1ps
 `default_nettype none
 
-`define VERB
+`include "test_setup.vh"
 
 module adapter_master_spi #(parameter DLY = 20)
 (
@@ -39,14 +39,27 @@ task xchg(input logic [7:0] data_in, output logic [7:0] data_out);
         spi_clk <= 1'b0;        
     end
     data_out = acc;
-`ifdef VERB
-    $display("[SPI Master] %0t : OOB send %x, recv %x", $time, data_in, acc);
-`endif
+    if (VERB) $display("[SPI Master] %0t : OOB send %x, recv %x", $time, data_in, acc);
 endtask
 
 task xchg4(input logic[31:0] data_in, output logic [31:0] data_out);
     for(int i=0; i<4; ++i) xchg(data_in[i*8-1 -: 7], data_out[i*8-1 -: 7]);
 endtask
+
+task check_finish();
+    if (queue.size() != 0 || queue_oob.size()0 || queue_exp.size() !=0 || queue_exp_oob.size() != 0) begin
+        $error("[SPI Master/Slave] <%m> %0t : Transaction not finished", $time);
+        $stop();
+    end
+endtask
+
+task start();
+endtask
+
+task stop();
+    check_finish();
+endtask
+
 
 task send(input logic[31:0] data);
     if (queue_oob.size()) begin
@@ -54,9 +67,7 @@ task send(input logic[31:0] data);
         $stop();
     end
     queue.push_back(data);
-`ifdef VERB
-    $display("[SPI Master] %0t : Send %X, recv %X", $time, data_in, acc);
-`endif
+    if (VERB) $display("[SPI Master] %0t : Send %X, recv %X", $time, data_in, acc);
 endtask
 
 task send_oob(input logic[7:0] data);
@@ -81,6 +92,22 @@ task expect_oob(input logic [7:0] data);
         $stop();
     end
     queue_exp_oob.push_back(data);
+endtask
+
+task send_array(input logic [31:0] data[]);
+    for(int i=0; i<data.size(); ++i) send(data[i]);
+endtask
+
+task send_oob_array(input logic [7:0] data[]);
+    for(int i=0; i<data.size(); ++i) send_oob(data[i]);
+endtask
+
+task expect_array(input logic [31:0] data[]);
+    for(int i=0; i<data.size(); ++i) expect(data[i]);
+endtask
+
+task expect_oob_array(input logic [7:0] data[]);
+    for(int i=0; i<data.size(); ++i) expect_oob(data[i]);
 endtask
 
 task run();
