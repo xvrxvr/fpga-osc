@@ -29,7 +29,7 @@ task xchg(input logic [7:0] data_in, output logic [7:0] data_out);
     automatic logic [7:0] shift = data_in;
     spi_cs <= 1'b0;
     #DLY;
-    for(int i=0 ;<8; ++i) begin
+    for(int i=0; i<8; ++i) begin
         spi_mosi = shift[0];
         shift = shift >> 1;
         #DLY;
@@ -47,7 +47,7 @@ task xchg4(input logic[31:0] data_in, output logic [31:0] data_out);
 endtask
 
 task check_finish();
-    if (queue.size() != 0 || queue_oob.size()0 || queue_exp.size() !=0 || queue_exp_oob.size() != 0) begin
+    if (queue.size() != 0 || queue_oob.size() != 0 || queue_exp.size() !=0 || queue_exp_oob.size() != 0) begin
         $error("[SPI Master/Slave] <%m> %0t : Transaction not finished", $time);
         $stop();
     end
@@ -61,53 +61,36 @@ task stop();
 endtask
 
 
-task send(input logic[31:0] data);
+task send(input logic[31:0] data[]);
     if (queue_oob.size()) begin
         $error("[SPI Master] %0t : Mix OOB and Normal data", $time);
         $stop();
     end
-    queue.push_back(data);
-    if (VERB) $display("[SPI Master] %0t : Send %X, recv %X", $time, data_in, acc);
+    for(int i=0; i<data.size(); ++i) queue.push_back(data[i]);
 endtask
 
-task send_oob(input logic[7:0] data);
+task send_oob(input logic[7:0] data[]);
     if (queue.size()) begin
         $error("[SPI Master] %0t : Mix OOB and Normal data", $time);
         $stop();
     end
-    queue_oob.push_back(data);
+    for(int i=0; i<data.size(); ++i) queue_oob.push_back(data[i]);
 endtask
 
-task expect(input logic [31:0] data);
+task exp(input logic [31:0] data[]);
     if (queue_oob.size() || queue_exp_oob.size()) begin
         $error("[SPI Master] %0t : Mix OOB and Normal data", $time);
         $stop();
     end
-    queue_exp.push_back(data);
+    for(int i=0; i<data.size(); ++i) queue_exp.push_back(data[i]);
 endtask
 
-task expect_oob(input logic [7:0] data);
+task exp_oob(input logic [7:0] data[]);
     if (queue.size() || queue_exp.size()) begin
         $error("[SPI Master] %0t : Mix OOB and Normal data", $time);
         $stop();
     end
-    queue_exp_oob.push_back(data);
-endtask
-
-task send_array(input logic [31:0] data[]);
-    for(int i=0; i<data.size(); ++i) send(data[i]);
-endtask
-
-task send_oob_array(input logic [7:0] data[]);
-    for(int i=0; i<data.size(); ++i) send_oob(data[i]);
-endtask
-
-task expect_array(input logic [31:0] data[]);
-    for(int i=0; i<data.size(); ++i) expect(data[i]);
-endtask
-
-task expect_oob_array(input logic [7:0] data[]);
-    for(int i=0; i<data.size(); ++i) expect_oob(data[i]);
+    for(int i=0; i<data.size(); ++i) queue_exp_oob.push_back(data[i]);
 endtask
 
 task run();
@@ -121,12 +104,12 @@ task run();
         while(queue.size()) begin
             automatic logic [31:0] exp;
             automatic logic [31:0] data;
-            automatic logic [31:0] real;
+            automatic logic [31:0] real_data;
             data = queue.pop_front();
             exp = queue_exp.pop_front();
-            xchg4(data, real);
-            if (real != exp) begin
-                $error("[SPI Master] %0t : Expected data missmatch - expected %X got %X", $time, exp, real);
+            xchg4(data, real_data);
+            if (real_data != exp) begin
+                $error("[SPI Master] %0t : Expected data missmatch - expected %X got %X", $time, exp, real_data);
                 $stop();
             end
         end
@@ -136,12 +119,12 @@ task run();
         while(queue.size()) begin
             automatic logic [7:0] exp;
             automatic logic [7:0] data;
-            automatic logic [7:0] real;
+            automatic logic [7:0] real_data;
             data = queue_oob.pop_front();
             exp = queue_exp_oob.pop_front();
-            xchg(data, real);
-            if (real != exp) begin
-                $error("[SPI Master] %0t : Expected OOB data missmatch - expected %X got %X", $time, exp, real);
+            xchg(data, real_data);
+            if (real_data != exp) begin
+                $error("[SPI Master] %0t : Expected OOB data missmatch - expected %X got %X", $time, exp, real_data);
                 $stop();
             end
         end

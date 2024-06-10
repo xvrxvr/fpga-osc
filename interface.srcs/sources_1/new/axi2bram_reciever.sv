@@ -3,6 +3,8 @@
 
 `include "utils.vh"
 
+import SPIInterf::*;
+
 // AXIStream (slave) -> BRAM module (writer). Input interface
 // Recieve BRAM (or any other data) from AXIStream slave interface
 
@@ -14,7 +16,7 @@ input wire clk,
 AXIStream.slave interf,
 
 // BRAM/Registers (write interface)
-output wire SPIInterf::RegRAMPayload ram_addr,   // Address to write
+output wire RegRAMPayload ram_addr,   // Address to write
 output wire [31:0] ram_data,    // Data to write
 output wire ram_wr_en,         // Write strobe
 output wire addr_wr_stb,        // Set with 'ram_addr' setup

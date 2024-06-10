@@ -1,4 +1,4 @@
-﻿`timescale 1ps/1ps
+`timescale 1ps/1ps
 
 `include "test_setup.vh"
 
@@ -42,13 +42,8 @@ task stop();
     axi4stream_vip_agent.stop_master();
 endtask
 
-
-task send(input logic [31:0] data_);
-    data.push_back(data_);
-endtask
-
-task send_array(input logic [31:0] data_[]);
-    for(int i=0; i < data_.size(); ++i) send(data_[i]);
+task send(input logic [31:0] data_[]);
+    for(int i=0; i < data_.size(); ++i) data.push_back(data_[i]);
 endtask
 
 task run();
@@ -61,7 +56,7 @@ task run();
         wr_transaction.set_data_beat(data.pop_front);
         wr_transaction.set_dest(dest);
         wr_transaction.set_last(data.size() == 0);
-        wr_transaction.set_user({3'b0, first});
+        wr_transaction.set_user_beat({3'b0, first});
         first = '0;
         axi4stream_vip_agent.driver.send(wr_transaction);
     end

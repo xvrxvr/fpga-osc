@@ -1,4 +1,4 @@
-﻿`timescale 1ps/1ps
+`timescale 1ps/1ps
 
 `include "test_setup.vh"
 
@@ -28,7 +28,7 @@ initial begin : START_axi4stream_vip_SLAVE
     axi4stream_vip_agent.set_verbosity(VERB ? 400 : 0);
 
     ready_gen = axi4stream_vip_agent.driver.create_ready("ready_gen");
-    ready_gen.set_ready_policy(XIL_AXI4STREAM_READY_GEN_NO_BACKPRESSURE) //XIL_AXI4STREAM_READY_GEN_OSC); 
+    ready_gen.set_ready_policy(XIL_AXI4STREAM_READY_GEN_NO_BACKPRESSURE); //XIL_AXI4STREAM_READY_GEN_OSC); 
     //ready_gen.set_low_time(1);
     //ready_gen.set_high_time(2);
     axi4stream_vip_agent.driver.send_tready(ready_gen);
@@ -50,12 +50,8 @@ task stop();
     axi4stream_vip_agent.stop_slave();
 endtask
 
-task expect(input logic [31:0] data_);
-    data.push_back(data_);
-endtask
-
-task expect_array(input logic [31:0] data_[]);
-    for(int i=0; i < data_.size(); ++i) expect(data_[i]);
+task exp(input logic [31:0] data_[]);
+    for(int i=0; i < data_.size(); ++i) data.push_back(data_[i]);
 endtask
 
 task run();
@@ -65,11 +61,19 @@ task run();
     automatic logic [7:0] dest = data[0][31 -: 8];
 
     while(data.size()) begin
-        automatic axi4stream_monitor_transaction org = axi4stream_vip_agent.driver.create_transaction("gold");
+        //automatic axi4stream_monitor_transaction org = axi4stream_vip_agent.driver.create_transaction("gold");
+        automatic axi4stream_transaction org = new("gold",
+            axi4stream_vip_agent.driver.C_XIL_AXI4STREAM_SIGNAL_SET,
+            axi4stream_vip_agent.driver.C_XIL_AXI4STREAM_DATA_WIDTH,
+            axi4stream_vip_agent.driver.C_XIL_AXI4STREAM_USER_WIDTH,
+            axi4stream_vip_agent.driver.C_XIL_AXI4STREAM_USER_BITS_PER_BYTE,
+            axi4stream_vip_agent.driver.C_XIL_AXI4STREAM_ID_WIDTH,
+            axi4stream_vip_agent.driver.C_XIL_AXI4STREAM_DEST_WIDTH);
+
         org.set_data_beat(data.pop_front);
         org.set_dest(dest);
         org.set_last(data.size() == 0);
-        org.set_user({3'b0, first});
+        org.set_user_beat({3'b0, first});
         first = '0;
 
         axi4stream_vip_agent.monitor.item_collected_port.get(trans);

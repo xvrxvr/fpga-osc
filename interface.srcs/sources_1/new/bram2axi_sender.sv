@@ -16,7 +16,7 @@ AXIStream.master interf,
 // BRAM interface (2 clock delay BRAM read assumed)
 input wire [31:0] ram_data, // data read from BRAM 
 output wire ram_rd_en, // Read strobe
-output wire SPIInterf::RegRAMPayload ram_addr, // Address to read.
+output wire RegRAMPayload ram_addr, // Address to read.
 
 // Control
 input wire [31:0] ctrl_start_address, // BRAM start address to send contents

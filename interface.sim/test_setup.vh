@@ -1,4 +1,4 @@
-﻿`ifndef _TEST_SETUP_w2376842376864_
+`ifndef _TEST_SETUP_w2376842376864_
 `define _TEST_SETUP_w2376842376864_
 
 const int VERB = 0;

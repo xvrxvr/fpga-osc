@@ -1,4 +1,4 @@
-﻿`timescale 1ps/1ps
+`timescale 1ps/1ps
 
 `include "test_setup.vh"
 
@@ -9,7 +9,7 @@ logic spi_mosi;
 logic spi_miso;
 logic spi_cs;
 logic spi_frame;
-AXIStream interf_host2fpga, interf_fpga2host;
+AXIStream interf_host2fpga(), interf_fpga2host();
 
 logic spi_int;// Check in TB
 
@@ -29,8 +29,8 @@ task run();
     `START;
 
     $display("[SPI FE Test] %0t: Simple write", $time);
-    spi_adapter.send_array({32'h01000000, 32'h0, 32'h0});
-    axi_s.expect_array({32'h01000000, 32'h0, 32'h0});
+    spi_adapter.send({32'h01000000, 32'h0, 32'h0});
+    axi_s.exp({32'h01000000, 32'h0, 32'h0});
     `TEST;
 
     `STOP;
