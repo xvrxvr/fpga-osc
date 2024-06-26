@@ -61,36 +61,34 @@ task stop();
 endtask
 
 
-task send(input logic[31:0] data[]);
+task send(input logic[31:0] data[], input logic [31:0] exp[]);
     if (queue_oob.size()) begin
         $error("[SPI Master] %0t : Mix OOB and Normal data", $time);
         $stop();
     end
-    for(int i=0; i<data.size(); ++i) queue.push_back(data[i]);
+    if (data.size() != exp.size()) begin
+        $error("[SPI Master] %0t : Send and Exp data array must be the same size", $time);
+        $stop();
+    end
+    for(int i=0; i<data.size(); ++i) begin
+        queue.push_back(data[i]);
+        queue_exp.push_back(exp[i]);
+    end
 endtask
 
-task send_oob(input logic[7:0] data[]);
+task send_oob(input logic[7:0] data[], input logic [7:0] exp[]);
     if (queue.size()) begin
         $error("[SPI Master] %0t : Mix OOB and Normal data", $time);
         $stop();
     end
-    for(int i=0; i<data.size(); ++i) queue_oob.push_back(data[i]);
-endtask
-
-task exp(input logic [31:0] data[]);
-    if (queue_oob.size() || queue_exp_oob.size()) begin
-        $error("[SPI Master] %0t : Mix OOB and Normal data", $time);
+    if (data.size() != exp.size()) begin
+        $error("[SPI Master] %0t : Send and Exp (OOB) data array must be the same size", $time);
         $stop();
+    end    
+    for(int i=0; i<data.size(); ++i) begin
+        queue_oob.push_back(data[i]);
+        queue_exp_oob.push_back(exp[i]);
     end
-    for(int i=0; i<data.size(); ++i) queue_exp.push_back(data[i]);
-endtask
-
-task exp_oob(input logic [7:0] data[]);
-    if (queue.size() || queue_exp.size()) begin
-        $error("[SPI Master] %0t : Mix OOB and Normal data", $time);
-        $stop();
-    end
-    for(int i=0; i<data.size(); ++i) queue_exp_oob.push_back(data[i]);
 endtask
 
 task run();
