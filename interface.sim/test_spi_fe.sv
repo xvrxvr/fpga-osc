@@ -29,7 +29,7 @@ task run();
     `START;
 
     $display("[SPI FE Test] %0t: Simple write", $time);
-    spi_adapter.send({32'h01000000, 32'h0, 32'h0}, {O_ESC_Pkt, O_ESC_Pkt, O_ESC_Pkt, O_ESC_Pkt});
+    spi_adapter.send({32'h01000000, 32'h0, 32'h0}, {O_ESC_Pkt, O_ESC_Pkt, O_ESC_Pkt});
     axi_s.exp({32'h01000000, 32'h0, 32'h0});
     `TEST;
 

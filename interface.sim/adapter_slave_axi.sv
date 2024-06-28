@@ -27,11 +27,6 @@ initial begin : START_axi4stream_vip_SLAVE
     axi4stream_vip_agent = new("axi_slave_vip", axi_stream_vip.inst.IF);
     axi4stream_vip_agent.set_verbosity(VERB ? 400 : 0);
 
-    ready_gen = axi4stream_vip_agent.driver.create_ready("ready_gen");
-    ready_gen.set_ready_policy(XIL_AXI4STREAM_READY_GEN_NO_BACKPRESSURE); //XIL_AXI4STREAM_READY_GEN_OSC); 
-    //ready_gen.set_low_time(1);
-    //ready_gen.set_high_time(2);
-    axi4stream_vip_agent.driver.send_tready(ready_gen);
 end
 
 task check_finish();
@@ -43,6 +38,11 @@ endtask
 
 task start();
     axi4stream_vip_agent.start_slave();
+    ready_gen = axi4stream_vip_agent.driver.create_ready("ready_gen");
+    ready_gen.set_ready_policy(XIL_AXI4STREAM_READY_GEN_NO_BACKPRESSURE); //XIL_AXI4STREAM_READY_GEN_OSC); 
+    //ready_gen.set_low_time(1);
+    //ready_gen.set_high_time(2);
+    axi4stream_vip_agent.driver.send_tready(ready_gen);
 endtask
 
 task stop();

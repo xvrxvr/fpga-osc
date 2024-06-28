@@ -67,7 +67,7 @@ task send(input logic[31:0] data[], input logic [31:0] exp[]);
         $stop();
     end
     if (data.size() != exp.size()) begin
-        $error("[SPI Master] %0t : Send and Exp data array must be the same size", $time);
+        $error("[SPI Master] %0t : Send and Exp data array must be the same size (%0d/%0d)", $time, data.size(), exp.size());
         $stop();
     end
     for(int i=0; i<data.size(); ++i) begin
@@ -82,7 +82,7 @@ task send_oob(input logic[7:0] data[], input logic [7:0] exp[]);
         $stop();
     end
     if (data.size() != exp.size()) begin
-        $error("[SPI Master] %0t : Send and Exp (OOB) data array must be the same size", $time);
+        $error("[SPI Master] %0t : Send and Exp (OOB) data array must be the same size (%0d/%0d)", $time, data.size(), exp.size());
         $stop();
     end    
     for(int i=0; i<data.size(); ++i) begin
