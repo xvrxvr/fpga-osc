@@ -455,7 +455,7 @@ module spi_fifo_ctrl(
 );
 
 ///// Input SPI part
-logic [6:0] spi_reg_threshold;
+logic [6:0] spi_reg_threshold = '0;
 
 spi8_in spi_in(.*);
 

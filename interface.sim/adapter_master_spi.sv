@@ -39,11 +39,11 @@ task xchg(input logic [7:0] data_in, output logic [7:0] data_out);
         spi_clk <= 1'b0;        
     end
     data_out = acc;
-    if (VERB) $display("[SPI Master] %0t : OOB send %x, recv %x", $time, data_in, acc);
+    if (VERB) $display("[SPI Master] %0t : LL send %x, recv %x", $time, data_in, acc);
 endtask
 
 task xchg4(input logic[31:0] data_in, output logic [31:0] data_out);
-    for(int i=0; i<4; ++i) xchg(data_in[i*8-1 -: 7], data_out[i*8-1 -: 7]);
+    for(int i=0; i<4; ++i) xchg(data_in[i*8+7 -: 8], data_out[i*8+7 -: 8]);
 endtask
 
 task check_finish();
@@ -114,7 +114,7 @@ task run();
         #DLY;
         spi_frame <= 1'b1;
     end else begin
-        while(queue.size()) begin
+        while(queue_oob.size()) begin
             automatic logic [7:0] exp;
             automatic logic [7:0] data;
             automatic logic [7:0] real_data;

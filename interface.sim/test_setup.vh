@@ -1,7 +1,7 @@
 `ifndef _TEST_SETUP_w2376842376864_
 `define _TEST_SETUP_w2376842376864_
 
-const int VERB = 0;
+const int VERB = 1;
 
 typedef enum logic [31:0] {
     O_ESC_Data = 32'hA325213C,

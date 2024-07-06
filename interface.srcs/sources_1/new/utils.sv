@@ -29,7 +29,7 @@ module utils_dly #(parameter N=1, type Type=logic) (
     input wire ce,
     output wire Type out_scale [N-1:0] 
 );
-Type shift_reg[N-1:0];
+Type shift_reg[N-1:0] = '{'0};
 assign out_scale = shift_reg;
 assign out = shift_reg[N-1];
 

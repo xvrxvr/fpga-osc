@@ -16,7 +16,7 @@ logic spi_int;// Check in TB
 logic [9:0] fpga2host_fifo_filled = '0; // 0-512   Set in TB
 logic [9:0] host2fpga_fifo_empty ='0; // 0-512     Set in TB
     
-logic err_outfifo_overflow_pulse; // Set in TB
+logic err_outfifo_overflow_pulse = '0; // Set in TB
 
 spi_interface dut(.*);
 adapter_master_spi #(SPI_DLY) spi_adapter(.*);
