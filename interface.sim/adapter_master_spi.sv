@@ -98,7 +98,7 @@ task run();
             $stop();
         end
         spi_frame <= 1'b0;
-        #DLY;
+        #(DLY*10);
         while(queue.size()) begin
             automatic logic [31:0] exp;
             automatic logic [31:0] data;
@@ -111,7 +111,7 @@ task run();
                 $stop();
             end
         end
-        #DLY;
+        #(DLY*10);
         spi_frame <= 1'b1;
     end else begin
         while(queue_oob.size()) begin
