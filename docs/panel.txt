@@ -1,0 +1,104 @@
+Control panels.
+================
+
+Control panels are toolbars that control the behavior of the oscilloscope. They include a set of controls of predefined types and a JS script that links the controls to the internal components of the oscilloscope.
+All controls on a panel can also be linked to external hardware controls.
+
+Each panel is defined in a configuration file and can be placed either in GUI resources or provided by the user.
+
+The panel is organized as a grid of a fixed size (in square cells). Any control can be placed in a single cell. Some controls (such as buttons) can be placed in pairs in a single cell (in this case, the cell will be split horizontally).
+
+The cell size of a panel is fixed and is defined as a percentage of the main window size. The geometry of the panels does not change (the panel cannot be resized).
+
+Any rectangular area of the panel can be placed in a Bevel (QPanel) to provide visual distinction. Bevels can be nested, but cannot overlap each other.
+All QPanel properties can be set in the panel configuration file.
+
+Additional texts can be placed on all 4 edges of the cells. Vertical text can be rotated.
+
+Some types of controls (currently only one - the LED strip control) can be placed inside a rectangular range of cells along any of the 4 edges (of this area). This type of control placement occupies the space reserved for text placement.
+In this configuration, these cells can contain another control.
+In general, a cell can only contain 1 control (except for these cases)
+
+All Qt attributes of any control can be configured via the configuration file.
+All controls exposed to JS script, including properties, events and actions. All controls must have a name (this will be used in the JS script to access them)
+
+Control types:
+--------------
+
+1. Pushbuttons
+2. Toggle buttons
+3. Simple LED
+    Adjustable property: color
+4. Bicolor LED
+    Adjustable property: color pair
+    Runtime property: color (off, 2 solid colors, 1/4, 1/2, 3/4 color mix)
+5. RGB LED
+    Runtime property: Color (one of 8)
+6. Joystick button (with or without center "Hit" button)
+7. Unlimited dial control (continuous rotation in both directions)
+8. Universal control (joystick + dial)
+9. LED strip. Can be configured as LED grid or LED strip
+    Adjustable property: rows, columns, start corner, X direction.
+    Grid version can be set in a cell, strip version can be set along the edge of adjustable cells (vertically or horizontally)
+    Any number of LED strips are supported, but they must be virtually organized into 1 or 2 LED strips to connect them to the hardware LED strings.
+10. Text message. (There is no hardware equivalent)
+11. Virtual LED strip. No visual representation, used to attach HW LEDs (up to 2 pcs) to visual LED strips.
+    Configuration: list of LED Strips (with optional override of config properies 'start corner', 'X direction' and new propery 'ZigZag filling')
+
+Control panel special features.
+----------------------------------
+
+Control panel can be defined in 3 versions (up to 3):
+1. Vertical (for docking on the left/right edge of the screen)
+2. Horizontal (for docking on the top/bottom edge of the screen)
+3. Rectangular (for non-docked version)
+
+All 3 versions will have the same set of controls (including all their properties)
+The system will automatically select the appropriate version when docking.
+----
+
+A control panel can form a panel set: a series of panels of the same size. Panels in a panel set can be switched within the same area on the screen from a JS script.
+----
+
+All controls must have visual feedback. It will be used primarily to visualize actions on attached hardware controls.
+----
+
+A control panel can be hidden but active. Such a panel is used solely to enable the hardware control attached to it.
+----
+
+HW controls are attached to control panel items by name. Complex HW controls have a special naming scheme:
+
+RGB LED: <name>.R, <name>.G, <name>.B
+
+Joystick: <name>.Up, <name>.Down, <name>.Left, <name>.Right, <name>.Hit (optional)
+
+Generic Control: <name>.Up, <name>.Down, <name>.Left, <name>.Right, <name>.Dial, <name>.Hit
+- Special handling for the Joystick Hit button and the Generic Control (Up/Down/Left/Right button mask) done in the HW Panel Controller/Setup
+
+A Control Panel can contain custom mappings of HW control names to control panel software control names.
+
+A HW control can be attached to multiple panels. There is a special attribute (for all controls) to define the behavior of multiple attachment (share) with the values:
+disable - Disable the HW control if multiple software controls with the same name are found
+unique - Only one software control will be attached to the HW (selection mechanism - TBD)
+shared - The HW control is attached to all software controls
+-----
+
+All controls from all control panels with the same name are attached to each other. All these controls must be similar: same type, same binding.
+Controls with names starting with "_" are considered local and not common to different control panels.
+----
+
+A control panel cell can contain reserved strips along the edges to accommodate bevels and text. The number of reserved strips is the same for all cells and is determined as a runtime constant.
+When there is more data to draw in the system than the available number of strips, then extra space is added to the edges of the cells (all 4) and the internal components are reduced.
+-----
+
+Text controls and text labels have an overflow mode (what to do if the text doesn't fit):
+Resize - Scale the text down
+Crop - Trim the text
+CropP - Trim the text and add '...' at the end
+
+A text label can be named. In this case, it has properties that can be changed with JS:
+Visible - Toggle visibility
+Text - Text to display
+-----
+
+A LED strip placed on the edge of a bevel(s) is aligned to fit along the innermost nested bevel that is not intersected by that LED strip.

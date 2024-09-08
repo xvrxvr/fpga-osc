@@ -1,0 +1,322 @@
+ExtControl Block.
+=================
+
+Supports up to 19 external controls (grouped into 2 groups of 10 and 9 pins), such as:
+    0. Disabled
+    1. Pushbutton
+    2. QEncoder
+    3. LED
+    4. Bi-color LED
+    5. Full-color LED strip
+
+Any of the 19 I/Os can support a pushbutton and an LED
+A pair of configured pins are used to support a QEncoder and a bi-color LED
+1 full-color LED strip controller can be connected to the last pin of any group (2 possible pins in total).
+
+Characteristics of each control:
+0 - Disabled
+    Represented as an input (internally disabled) with pull-up
+1 - Pushbutton
+    Has adjustable debounce (in the range of 0-127 ms)
+    Has adjustable delay (in the range of 0-15 ms)
+    Has an interrupt mask (1 bit)
+    Debounce and delay are performed with an accuracy of 1/16 ms
+2 - QEncoder
+    Has adjustable debounce (like a pushbutton)
+    The encoder distinguishes between 8 possible edge configurations: positive/negative edge (2) x on channel A/B (2) x state of the opposite channel (2).
+    The decoder generates pulses for +/- 1 for any set of edges (configurable). Edge Table:
+        0 - Positive Edge A + 0 on Channel B
+        1 - Negative Edge A + 0 on Channel B
+        2 - Positive Edge A + 1 on Channel B
+        3 - Negative Edge A + 1 on Channel B
+        4 - Positive Edge B + 0 on Channel A
+        5 - Negative Edge B + 0 on Channel A
+        6 - Positive Edge B + 1 on Channel A
+        7 - Negative Edge B + 1 on Channel A
+3 - LED
+    LED output can be set to 0/1
+    Also used for FullColor LED strip.
+4 - Bi-color LED
+    LED color is determined by the polarity applied between its contacts. LED contacts are connected to 2 serial contacts.
+    The system supports mixed color by applying PWM on the outputs. PWM frequency is 1 kHz, duty cycle is 0, 1/4, 1/2, 3/4, 1. OFF state is also supported. Values (3 bits):
+        0 - OFF
+        1 - PWM, dcycle is 0
+        2 - PWM, dcycle is 1
+        3 - PWM, dcycle is 1/4
+        4 - PWM, dcycle is 1/2
+        5 - PWM, dcycle is 3/4
+        6,7 - Reserved
+5 - Full color LED strip
+    Support almost any length of LED strip.
+    Support 2 dedicated pins (last in each group). The pin used must be programmed as LED in the pin configuration
+
+Packet format (HOST -> FPGA):
+----------------------------
+
+<ID><Section:3><HdrData>
+...
+
+ID - module ID (as assigned in RTL and defined in JSON configuration)
+Section - target section for this packet (see below).
+HdrData - header part of data. Size and contents depend on section.
+
+Sections:
+---------
+
+Command: <ID:8>000<Command:21>
+    Execute simple command. List of commands:
+
+    0 - NOP (do nothing)
+    1 - Request to send current button state
+
+Configuration page: <ID:8>001<SubPage:3><CfgData:18>
+    Miscellaneous configuration data. The type of data is defined by the SubPage field.
+
+    Pin configuration: <ID:8>0010000..0AAAAA
+                       <CfgData:32> ... [up to 10 pcs]
+        Section contains 32-bit configuration words (1 per pin pair + FullColor LED configuration)
+        Internally treated as a memory area. CfgData contains the starting address in this area for writing (A)
+        Format of <CfgData> see below
+        Each CfgData defines the configuration for 2 consecutive pins. The last pin has no next pin, so its configuration should only define the first pin, the second should be set to "Disabled".
+        However, you can specify a BiColor configuration for the last pin slot. In this case, you will get some kind of PWM-controlled LED
+
+    FullColor LED configuration: <ID:8>001 001 0..0 <FreqDiv:8>
+        Setting the frequency divider for the path shape generator. The output frequency will be 100 MHz / (FreqDiv*3)
+
+    QEnc transition mask configuration: <ID:8>001 010 0..0 AAA
+                                        0..0 10 x <-+> ... [up to 8 pcs.]
+        Writes an array of event indices for all QEncs (one word - one index for all QEncs)
+        CfgHdr specifies the starting address in the event array to write
+        QEncoder is connected as a proxy between 2 instances of the button and the output scale. It generates '+' and '-' pulses as short button presses (the first for '+', the second for '-')
+        Which of them ('+' or '-') will be emitted is determined by this configuration array. The QEncoder event type is used as an index into the array, and the QEncoder's own index is used as an index into the bit scale contained in this array cell.
+
+LED set group: <ID:8>010 ...
+
+    Bulk set: <ID:8>010 00<D:19>
+        Set all LEDs (and bicolor LEDs). Affects LEDs only.
+        Bicolor LEDs occupy 2 consecutive bits and set only the pure color. The combination '11' for a bicolor LED is ignored (LED state does not change)
+
+    Bulk set with mask: <ID:8>010 01<D:19>
+                        0..0 <M:19>
+        Update LEDs for which the M bit is 1 (as in the 'bulk set' command)
+
+    Set individual LED: <ID:8>010 10...0 AAAAA VVV
+        Set LED number <A> to value <V>. For a bicolor LED, all 3 <V> bits are used, for a simple LED, only bit 0
+
+Set up a full-color LED strip: <ID:8>011 0..0<Total:12>PP
+                               <Data> ... [up to 1023 words]
+    Send <Data> to the LED strip.
+
+    <Total> - Data size (in bytes). Should be equal to <number of LEDs in the strip>*3. A maximum of 1365 LEDs in a strip are supported
+    PP - Bit set {<pin 19><pin 10>} of the target pins to send to the LED strip. The target pins must be configured as LED pins.
+
+Packet format (FPGA -> HOST): <ID:8>00000<BtnState:19>
+------------------------------------------------------
+This packet will be sent by the FPGA if any of the following events occur:
+    1. The state of any button (with the 'interrupt enable' bit in the configuration equal to 1) has changed
+    2. Any QEncoder generates a positive or negative pulse
+    3. The 'Request to send current button state' command has been received
+The packet is generated asynchronously (except for the last case)
+
+Configuration word format (CfgData).
+------------------------------------
+
+Each configuration word describes the configuration for 2 consecutive pins. For a bicolor LED and a QEncoder, it describes the configuration for that entire object.
+
+2 Pin Configuration:
+
+<T1:2><T2:2><C1:14><C2:14>
+
+    T1 - Type for Pin 1
+    T2 - Type for Pin 2
+    C1 - Configuration Data for Pin 1
+    C2 - Configuration Data for Pin 2
+
+Types:
+    00 - Disabled
+    01 - LED
+    10 - Pushbutton
+    11 - Invalid (used for QEncoder and BiColor LED)
+
+BiColor and QEnc Configuration:
+
+11<T><C:28>
+
+    T - Type (0 - BiColor, 1 - QEncoder)
+    C - Configuration Data
+
+Configuration Data Format:
+-----------------------------
+
+Disabled - No Configuration
+
+Pushbutton: 00ddddDDDDDDDI
+    I - Interrupt Enable. If this bit is 1, any change in the state of this input will cause an FPGA->HOST packet to be sent with the current state of all buttons
+    D - Debounce time (in ms)
+    d - Delay (in ms)
+
+    When a button state changes, the system will block further button changes from being sent for <D> ms. The new button state will be registered as current (and sent to the host if needed) after a delay of <d> ms.
+
+    This is used to handle buttons that can be pressed in a group.
+    Example use case: the "hit" button on a joystick - it will be pressed at the same time as all the "direction" buttons. 
+    In this configuration, all the "direction" buttons should have a delay, so when any of them is reported pressed, the status of the "hit" button will be known and they can all be safely masked.
+
+LED: 0..0 V
+    V - Setting the current state of the output pin
+    When used to configure a FullColor LED strip, the V bit determines the inversion of the output.
+
+BiCiolor: 0....0 VVV
+    V - Setting the current color of the BiColor LED
+
+QEncoder: 2 x <button config>
+    The debugger configuration is filled in the same way as 2 Button config. The <I> fields are not used (reserved, should be 0)
+-----------------------------------------------------------------------------
+
+LogicAnalyzer Block.
+======================
+
+The LogicAnalyzer (LA) block is built around a RAM block that stores sampled data. The RAM size is configurable (and this size will be specified in the project's static JSON configuration). Each RAM word consists of 2 halves:
+    1. The high half (always 32 bits) is the TimeStamp value. This is a monotonically increasing counter with a frequency of 100 MHz.
+    2. The low part (configurable width, up to 32 bits) is the LA inputs
+
+The LA stores the LA inputs in a RAM location when the state of the inputs has changed or when all the TimeStamp bits are 1 (FFFFFFFF).
+
+The LA continuously stores samples in RAM immediately after power-up, and when the Trigger is fired, it simply remembers the RAM address in a special block (see below). This allows us to see what happened BEFORE the trigger, but it requires special handling in software, since the LA trace no longer starts at the beginning of the RAM.
+
+The LA module provides read-only access to both halves of the RAM.
+
+The HOST -> FPGA packet format is: <ID:8> <section:4> <data:20>
+                                   [ <data> ... ] - Optional
+
+Sections:
+
+    0 - BRAM read request (low word - LA inputs). Data is the starting address. The size to read is determined by the Section #3 packet. Reading starts after the end of this packet.
+
+    1 - BRAM read request (high word - timestamps). Data is the starting address. The size to read is determined by the Section #3 packet. Reading starts after the end of this packet.
+
+    2 - Write trigger RAM. Data is the starting address, data to write follows (see Trigger Block Definition)
+
+    3 - Set the size of the BRAM read request. Data is the size of the BRAM to read
+
+FPGA packet format -> HOST: <ID:8><original 24 bits from request>
+                            <read RAM image> ...
+----------------------------------------------------------------------------
+                                   
+LA Trigger Block.
+===================
+
+This block analyzes the inputs from the LA (and the oscilloscope) and generates start/stop events for the entire system.
+It consists of 2 parts: a Programmable Logic Array (PLA) and a Programmable State Machine (PSM).
+<pic>
+The PLA takes the LA inputs and up to 4 additional external signals (currently triggers from the oscilloscope block) and generates signals to change the state of the state machine.
+The PSM machine tracks this information and generates 2 output signals - the start and end of the data acquisition session.
+
+Both the PLA and the PSM used RAM blocks to implement arbitrary logic. The FPGA itself uses the same elements for the same purpose. 
+In FPGA, this is called a LUT (lookup table), and it takes 6 inputs (which are used as an address in the LUT RAM) and 1 output (the RAM output). 
+Thus, LUT can implement any 6-variable logic function by simply filling RAM with the appropriate content. We use the same RAM (inside LUT) for the same purpose - implementing a programmable logic function.
+
+The PLA itself consists of 4 identical blocks (let's call them PLUTs), which are fed with LA input signals (the same for all 4 blocks) and 2 of 4 external synchronization signals (different for all 4 blocks).
+Distributing external event signals across blocks increases the flexibility of event processing.
+
+The outputs of these 4 blocks are used directly as an event for the PSM block.
+
+PLUT, in turn, consists of 4 PAND blocks and output combining logic.
+
+The bottom level of the logic matrix is PAND.
+<pic>
+
+The main idea of the PLUT structure is the ability to represent any logical function in disjunctive normal form. For example, A ^ B is the same as A&~B | ~A&B. Each PAND matrix evaluates one disjunction over all input values.
+PLUT evaluates conjunctions of them. Thus, any DNF of at most 4 conjunctions is supported.
+
+In some corner cases, much more complex logical expressions can be evaluated. For example, any expression with 6 inputs can be evaluated. Some expressions can only be evaluated if the inputs are grouped in a certain order.
+
+The output PSM is implemented as 128x5 RAM.
+<pic>
+
+4 address inputs fed by the output of PLUT blocks, 3 inputs and outputs are used to store the state of the state machine (8 states in total). And the last 2 RAM outputs are used to generate start/stop signals (using leading edges on the corresponding outputs)
+
+Configuration loading schema.
+-----------------------------
+
+All RAM images for the entire Trigger block are loaded from the LA block (in section #2). The lower 5/6 bits of the RAM address in the input stream are used as the RAM address for all Trigger RAM blocks (6 bits for the state machine RAM, 5 for all others).
+
+All RAM PLUTs are programmed in one configuration word - different bits of it are directed to different RAMs (the configuration bit indices are shown in the corresponding figures).
+
+Different PLUTs and state machine RAMs are programmed at different addresses of the configuration stream (the addresses are shown in the corresponding figures)
+
+Thus, the effective configuration stream is organized as a RAM image of 284 x 29 bits.
+-------------------------------------------------------------------------------------------------------------
+
+Pattern Generator Block.
+==========================
+
+This block generates binary signal patterns at its output. Up to 32 bits of output data are supported. The depth of the generated sequence depends on the memory size and can vary (depending on the available RAM on the FPGA).
+The block uses the same approach as the logic analyzer - it uses <Time Stamp> + <Output Binary Vector> pairs stored in RAM blocks. 
+But unlike the logic analyzer, this block uses the time stamp not as an absolute one, but as a time (in 100 MHz ticks) from the previous one.
+The block also contains a Loop generator, which allows generating up to 4 loops (including nested ones). The Loop addresses (the beginning and end of the loop body) and the number of repetitions are fixed and are provided as configuration data.
+Loops can be organized in any form, but they cannot intersect with each other. Nested Loops can be placed in any of the 4 available Loop Slots, except when multiple Loops have the same end address.
+In this case, they must be placed in the order of their nesting - nested Loops must have a Loop Slot index greater than its parent.
+
+HOST -> FPGA packet format: <ID:8><Section:4><Data:20>
+-------------------------------------------------------
+
+Sections:
+    0 - Configuration. <Data> - Configuration data (see below)
+    1-4 - Loop slot 1-4 - Loop Slot setup (see below)
+    5 - Generator RAM. Data is the starting address, followed by the RAM content.
+
+Configuration:
+    Data: 0...0RA
+        R - Reset. Write 1 here to reset the Generator
+        A - Autostart. If this bit is 1, the Generator will start generating immediately upon system startup. If 0 - only after a Start event received from the Trigger block
+
+LoopSlot:
+    Data: <Address>. The actual configuration data is contained in the 2nd and subsequent words. <Address> specifies the starting index in the configuration space. Configuration space:
+
+        0 - Loop parameters: 0...0UE
+            U - The loop is unconditional. If set, the loop will jump to its beginning every time (the loop counter is not used)
+            E - Enabled. If 0, this Loop Slot will be ignored
+        1 - End of loop address. When the generator reaches this RAM address, it jumps to the beginning of the loop (see next word)
+        2 - Start of loop address. This is where the loop begins
+        3 - Counter (32 bits). How many times the loop will be repeated. (Note: A zero repeat counter is not supported)
+
+RAM data:
+    Data: <Start RAM address>*2. Contents - RAM image. One slot in RAM is represented by 2 words in the input stream:
+        2*A+0 - Data for the generator
+        2*A+1 - Timestamp
+
+FPFA -> HOST packets - are not generated. The block does not send anything to HOST.
+-------------------------------------------------------------------------------------------------------------
+
+Sequensor block.
+================
+
+Sequensor Control Write packet:
+<header:8 bit> <section:4 bit> <data:20 bit>
+
+Sections:
+0 - Commands. Data is bitset:
+    0 - Enable Seq
+1 - Write register(s). Data - write register address, data to write follow
+2 - Read register. Data is register address. Read process started after end of this packet.
+
+
+Read registers:
+0. Seq status (bitset)
+    0. Seq is running
+    1. Seq recording started by trigger
+    2. Seq stop is pending
+    3. Seq stopped by max Seq run span
+1. Seq start ts tick
+2. Seq end ts tick
+3. Seq start BRAM address
+4. Seq end BRAM address
+... Repeat 3 & 4 for all available BRAMs
+
+Write registers:
+0. Max Seq run span in ticks
+1. Seq end postpone in ticks
+2. Max Seq run span in ts ticks
+3. Seq end postpone in BRAM addresses
+... repeat 2 & 3 for all available BRAM
+
