@@ -32,7 +32,7 @@ l1_m2 m2(.clk, .data(in_data), .ext_sync(ext_trigger[2:1]), .out(w[1]), .wr_addr
 l1_m2 m3(.clk, .data(in_data), .ext_sync(ext_trigger[3:2]), .out(w[2]), .wr_addr(ram_addr[5:0]), .wr_data(ram_data[28:0]), .wr_en(ram_wr_en && ram_addr[8:6] == 2));   
 l1_m2 m4(.clk, .data(in_data), .ext_sync({ext_trigger[3],ext_trigger[0]}), .out(w[3]), .wr_addr(ram_addr[5:0]), .wr_data(ram_data[28:0]), .wr_en(ram_wr_en && ram_addr[8:6] == 3));   
 
-la_ram #(7, 5) mram(.clk, .rd_addr({state, w}), .rd_data(encoder_ram_out), .wr_addr(ram_addr[6:0]), .wr_data(ram_data[4:0]), .wr_en(ram_wr_en && ram_addr[8:6] == 4));
+la_ram #(7, 5) mram(.clk, .rd_addr({state, w}), .rd_data(encoder_ram_out), .wr_addr(ram_addr[6:0]), .wr_data(ram_data[4:0]), .wr_en(ram_wr_en && ram_addr[8:7] == 2)); // ram_addr[8:6] is 4 and 5
 
 always_ff @(posedge clk)
     if (reset) begin state <= '0; d1 <= '0; d2 <='0; end else

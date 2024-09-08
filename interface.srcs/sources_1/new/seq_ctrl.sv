@@ -38,15 +38,15 @@ Read registers:
     0. Seq is running
     1. Seq recording started by trigger
     2. Seq stop is pending
-    3. Seq stopped by max LA run span
+    3. Seq stopped by max Seq run span
 1. Seq start ts tick
 2. Seq end ts tick
 3. Seq start BRAM address
 4. Seq end BRAM address
-... Repeat 2&4 for all available BRAMs
+... Repeat 3 & 4 for all available BRAMs
 
 Write registers:
-0. Max Seq run span in BRAM addresses
+0. Max Seq run span in ticks
 1. Seq end postpone in ticks
 2. Max Seq run span in ts ticks
 3. Seq end postpone in BRAM addresses
@@ -64,7 +64,7 @@ typedef enum {
     RR_START_TS,
     RR_END_TS,
     RR_START_RAM,  // Duplicated for all BRAMs
-    RR_END_RAM,
+    RR_END_RAM,    // Duplicated for all BRAMs
     
     RR_TOTAL
 } Seq_ProtRdRegs;    
@@ -73,7 +73,7 @@ typedef enum {
     WR_MAX_SPAN_TS,
     WR_DELAY_TS,
     WR_MAX_SPAN_RAM,   // Duplicated for all BRAMs
-    WR_DELAY_RAM,
+    WR_DELAY_RAM,      // Duplicated for all BRAMs
     
     WR_TOTAL
 } Seq_ProtWrRegs;
