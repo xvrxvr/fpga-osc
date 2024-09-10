@@ -288,35 +288,108 @@ RAM data:
 FPFA -> HOST packets - are not generated. The block does not send anything to HOST.
 -------------------------------------------------------------------------------------------------------------
 
-Sequensor block.
-================
+Sequencer Block.
+==================
 
-Sequensor Control Write packet:
-<header:8 bit> <section:4 bit> <data:20 bit>
+This block controls the start/stop of the entire system. It also monitors RAM write activity and stores RAM start/stop addresses for all blocks that have RAM for storing external information (currently these are the logic analyzer and oscilloscope blocks).
+The sequencer blocks themselves do not contain RAM, but they do contain a number of control and data registers. The registers of this block are divided into read-only and write-only registers (there are no registers that are read/write).
+The HOST -> FPGA packets are used to access the registers and accept commands.
+
+The sequencer block processes the start/stop signals from the trigger block. It also monitors timing and RAM write activity and forcibly terminates the accumulation session if there is a timeout or RAM overflow.
+To perform this task, the user must program this block for the maximum accumulation session time (in 100 MHz ticks) and the maximum number of words that can be written to all available RAM.
+Care must be taken to limit RAM writes to a maximum of the RAM size to avoid overwriting the RAM.
+
+HOST -> FPGA packet format: <ID:8 bits> <section:4 bits> <data:20 bits>
+-------------------------------------------------------------------
 
 Sections:
-0 - Commands. Data is bitset:
-    0 - Enable Seq
-1 - Write register(s). Data - write register address, data to write follow
-2 - Read register. Data is register address. Read process started after end of this packet.
+0 - Commands. Data is a bit set of:
+    0 - Enable the sequencer block. After writing a 1 to this bit, the entire system will start (and wait for the Trigger)
+1 - Write register(s). Data is the address of the register to write, followed by the data to write. Multiple data words allowed - multiple registers will be written.
+2 - Read register. Data is the address of the register. The reading process begins after the end of this packet. Only one register can be read at a time.
 
+FPFGA -> HOST packet format: <ID:8 bit><2 (section):4 bit><reg-index:20 bit> -- full copy of HOST->FPGA packet header
+                             <register image: 32 bit>
+Register image response to register read request.
+---------------------------------------------------------------------
 
-Read registers:
-0. Seq status (bitset)
-    0. Seq is running
-    1. Seq recording started by trigger
-    2. Seq stop is pending
-    3. Seq stopped by max Seq run span
-1. Seq start ts tick
-2. Seq end ts tick
-3. Seq start BRAM address
-4. Seq end BRAM address
-... Repeat 3 & 4 for all available BRAMs
+Read-only registers (can be read via read request in section #2)
+------------------------------------------------------------------
 
-Write registers:
-0. Max Seq run span in ticks
-1. Seq end postpone in ticks
-2. Max Seq run span in ts ticks
-3. Seq end postpone in BRAM addresses
-... repeat 2 & 3 for all available BRAM
+0. Sequencer status (bit set)
+    0. Sequencer running
+    1. Sequencer recording started by Trigger
+    2. Sequencer stop expected
+    3. Sequencer stopped by maximum sequencer execution range
+1. Sequencer start timestamp (in 100 MHz ticks). Contains the timestamp value when the trigger was fired.
+2. Sequencer end timestamp (in 100 MHz ticks). Contains the TimeStamp value when the accumulation session was terminated (by trigger or TS/RAM limits)
+{
+    3. Sequencer Start RAM Address. Contains the RAM address when the Trigger was fired. This is important because all RAMs in the system are filled continuously, without waiting for a Trigger.
+    4. Sequencer End RAM Address. Contains the RAM address at the end of the accumulation session.
+}
+Registers 3 and 4 will be replicated (to addresses 5 and 6, 7 and 8, etc.) to all RAMs in the system.
 
+Write-Only Registers (System Setup. Can be written via Section #1):
+0. Sets the maximum execution range in 100 MHz ticks
+1. Sets the session end deferral in 100 MHz ticks. If this register is non-zero, the accusition session will be terminated with a delay. 
+   Care must be taken with the maximum RAM fill limit when using this register - the deferral will be unconditional, so RAM overflow is possible.
+{
+    2. Setting for maximum filled RAM addresses in words.
+    3. Setting for deferral of termination in RAM addresses. If this register is non-zero, then the completion of the accumulation session will be delayed until this RAM has collected additional words.
+}
+Registers 2 and 3 will be replicated (to addresses 4 and 5, 6 and 7, etc.) for all RAMs in the system.
+----------------------------------------------------------------------------------------------------------
+
+Internal control unit.
+=========================
+
+This unit controls the BenchLab hardware. This unit directly controls 2 chips:
+    1. TCA9535 - I2C expander, which in turn controls several one wire control points inside the hardware (see below)
+    2. LMH6881 - PGA in the ADC path (controls the gain of the oscilloscope part)
+
+Connection of the I2C expander output:
+
+0-3. Direction control for the logic analyzer and pattern generator bytes. 
+     0 in the bit enables the logic analyzer path (the signal will be connected from the external connector to the FPGA pin). 
+     1 will enable the pattern generator mode (signal flow from the FPGA to the output connector)
+4. OE for the logic analyzer/pattern generator. Writing 0 will enable all inputs/outputs. Write 1 will disable all 32 signal paths. 
+   This pin has a pull-up, so all paths will be disabled on startup.
+5. Oscilloscope AC/DC input select coupling. 0 for DC coupling, 1 for AC coupling.
+6. ~CS for PGA. The PGA serial control lines are connected directly to the FPGA, but the CS is not. 
+   So to access the PGA, you need to set this pin to 0, then send the appropriate packet, and finally set this pin to 1 again.
+7. ADC ~EN signal. Set it to 0 to enable the ADC (and the oscilloscope). Leave this pin at 1 to disable the ADC (to save power)
+10-15. External LEDs. Set 0 to enable the LED. 3 of these LEDs should be used to indicate the activity of the oscilloscope, logic analyzer, and pattern generator (which one will be announced later). The others can be used for any purpose.
+16-17. Scope Attenuator Select (Bit 17, Bit 16):
+    00 - GND (selected at startup)
+    01 - 1:1
+    10 - 1:10
+    11 - 1:100
+
+HOST -> FPGA Packet: <ID:8><Section:4><Data:20>
+
+Sections:
+    0 - PGA SPI Write. The lower 16 bits of data are transferred serially to the PGA
+    1 - I2C Expander. The data is the I2C data to write (see below)
+    2 - I2C Bus Reset (not implemented yet)
+
+I2C Write Data Format: <R:3><L:1><B2:8><B1:8>
+    L - I2C Data Packet Length (0-1 byte, 1-2 bytes)
+    R - Register Index to write
+    B1 - First byte to write
+    B2 - 2nd byte to write (if L is 1)
+
+I2C only supports 1/2 byte write transaction (excluding register index). I2C Write Format:
+1 byte:  <Start><01000000><ACK><00000RRR><ACK><B1....><ACK><Stop>
+2 bytes: <Start><01000000><ACK><00000RRR><ACK><B1....><ACK><B2...><ACK><Stop>
+
+<ACK> is generated by TCA9535 and verified by FPGA. If <ACK> is not present, I2C transmission stops and <Stop> is generated.
+The host is notified of the error via the Communication Error Reporting Channel (not yet implemented)
+
+I2C Bus Reset Algorithm:
+
+1) The master attempts to set the SDA line to logic 1
+2) The master still sees a logic 0, then generates a clock pulse on SCL (1-0-1 transition)
+3) The master checks SDA. If SDA = 0, go to step 2; if SDA = 1, go to step 4 (maximum number of repetitions is 9)
+4) Generates a STOP condition
+
+Note that this process may need to be repeated, since the cleared SDA line may have been cleared for the next bit, which was 1.
