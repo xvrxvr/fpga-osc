@@ -288,6 +288,42 @@ RAM data:
 FPFA -> HOST packets - are not generated. The block does not send anything to HOST.
 -------------------------------------------------------------------------------------------------------------
 
+Oscilloscope Block.
+=====================
+
+The oscilloscope block accumulates the ADC values into the internal RAM. The ADC is 10 bits wide and the RAM is 32 bits wide. Thus, each RAM word contains 3 ADC samples. The upper 2 bits
+of the RAM word contain the number of samples (1-3). The value 0 denotes the triplet stored from the decimation block.
+
+The ADC is always clocked at its maximum frequency (100 MHz), and to slow down the sampling rate, this block supports decimation of the input samples. 
+Decimation is performed by averaging the input samples to values that are powers of two. Supported values are from 1 to 2^15 (32768). Thus, the minimum sampling frequency is about 3 kHz.
+The decimation module can provide single samples, in which case they will be packed 3 at a time into a single RAM word (as without decimation).
+It can also provide triplets - min-value/max-value/avg-value. In this case, the triplet will be stored in a single RAM word.
+
+The oscilloscope block supports various representations of ADC values. For bipolar input values, it supports two's complement and offset representation
+(where zero is represented as 1000, maximum negative as 0, and maximum positive as 1FFF).
+
+HOST -> FPGA packet format: <ID:8><Section:4><Data:20>
+
+Sections:
+0 - Control register. Data - control register image:
+    0 - use_tripple_dec - Store 3 values from the decimator: min/max/avg (the value tag will be 0). If 0, store only avg
+    1 - signed_repr - Set to 1 if ADC value is signed (binary's complement)
+    2 - shifted_repr - ADC uses zero-shifted representation (ADC value = V + 10'b10000000000)
+    3-6 decimation - Decimator setup. The value of this field is a frequency divider in power of 2 (1 << decimation). 
+        The ADC will run at 100 MHz, dividing by averaging samples. Minimum effective sample rate is ~3 kHz
+1 - RAM Read Size. Data is the packet size to read.
+2 - RAM Read Request. Data part is the starting address of RAM. Total number of words to read took from write to previous section
+3-7 - Trigger 1-4 setup. Data is the trigger setup image: !!! Doesn't fit in 20 bits :( Need to change !!!
+    0 - tr_down - Trigger on negative signal slope
+    1 - tr_up - Trigger on positive signal slope
+    2-9 - delta - Trigger hysteresis
+    10-19 - value - Trigger value
+    If delta is not equal to 0, then the trigger will be activated with hysteresis {value + delta, value - delta}.
+
+FPGA -> HOST packet: <ID:8><original from request>
+                     <data> ... - RAM image
+----------------------------------------------------------------------------------------------------------------
+
 Sequencer Block.
 ==================
 
@@ -393,3 +429,4 @@ I2C Bus Reset Algorithm:
 4) Generates a STOP condition
 
 Note that this process may need to be repeated, since the cleared SDA line may have been cleared for the next bit, which was 1.
+---------------------------------------------------------------

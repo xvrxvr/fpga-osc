@@ -25,7 +25,7 @@
 
 import SPIInterf::*;
 
-// OSC data stored 3 points in word. High 2 bits (SamplaTag) contains number of samples, stored in word.
+// OSC data stored 3 points in word. High 2 bits (SampleTag) contains number of samples, stored in word.
 // SamplaTag of 0 denotes 3 value from decimator, stored in one word: min/max/avg
 
 typedef enum {
@@ -36,24 +36,32 @@ typedef enum {
     HSOWR_T2_Setup,
     HSOWR_T3_Setup,
     HSOWR_T4_Setup,
-    HSOWR_HW_Setup, // From here and to end - interface to OSC hardware (TBD)
     
     HSOWR_Total
 } HiSOscWriteReagister;
 
 typedef struct packed {
-    logic [3:0] decimation; // Frequency divider (1 << decimation). ADC will run on 100MHz, dividing performed by averedging samples. Min effective sampling is ~3KHz
+    logic [3:0] decimation; // Frequency divider (1 << decimation). ADC will run on 100MHz, dividing performed by averaging samples. Min effective sampling is ~3KHz
     logic shifted_repr;     // ADC use shifted-zero representation (ADC value = V + 10'b10000000000)
     logic signed_repr;      // Set to 1 if ADC value is signed
     logic use_tripple_dec;  // Store 3 value from decimator: min/max/avg (value tag will be 0). If 0 store only avg
 } HiSOscControl;
 
+// Internal version of Trigger Setup
 typedef struct packed {
     logic [9:0] min_value;  // Low value of trigger (hysterises)
     logic [9:0] max_value;  // High value of trigger (hysterises)
     logic tr_up;            // Trigger on cross 0 -> hi
     logic tr_down;          // Trigger on cross hi -> 0
 } HiSOscTrigger;
+
+// Input format of Trigger setup (it ust fit into 20 bit)
+typedef struct packed {
+    logic [9:0] value;      // Base value of trigger
+    logic [7:0] delta;      // hysterises value of trigger. Trigger will be <value-delta, value+delta>
+    logic tr_up;            // Trigger on cross 0 -> hi
+    logic tr_down;          // Trigger on cross hi -> 0
+} HiSOscTriggerInp;
 
 typedef enum logic [1:0] {
     HSOST_Tripple,
@@ -241,16 +249,25 @@ module hso_triger(
     
     input wire reset,
     
-    input wire [31:0] cfg_data,
+    input wire [19:0] cfg_data,
     input wire cfg_stb
 );
+HiSOscTriggerInp setup_inp;
 HiSOscTrigger setup;
-`USED_PART(HiSOscTrigger, cfg_data);
+
+assign setup_inp = cfg_data;
 
 logic cur_state = '0;
 logic prev_state = '0;
 
-always_ff @(posedge clk) if (cfg_stb) setup <= cfg_data; 
+always_ff @(posedge clk) 
+    if (cfg_stb) 
+        setup <= HiSOscTrigger'{
+            .min_value: setup_inp.value - setup_inp.delta,
+            .max_value: setup_inp.value + setup_inp.delta,
+            .tr_up:     setup_inp.tr_up,  
+            .tr_down:   setup_inp.tr_down
+        };
 
 always_ff @(posedge clk)
     if (reset) cur_state <= '0; else
